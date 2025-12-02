@@ -180,7 +180,7 @@ export default function Quiz() {
     return (
       <Card className="border-2">
         <CardHeader className="text-center">
-          <CardTitle className="text-3xl mb-2">Elektromagnetische Golven Quiz</CardTitle>
+          <CardTitle className="text-3xl mb-2">Vragenreeks 1 (10 vragen)   </CardTitle>
           <CardDescription className="text-lg">
             Test je kennis met {originalQuestions.length} meerkeuzevragen
           </CardDescription>
