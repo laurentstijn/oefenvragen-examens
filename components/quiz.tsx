@@ -180,7 +180,7 @@ export default function Quiz() {
     return (
       <Card className="border-2">
         <CardHeader className="text-center">
-          <CardTitle className="text-3xl mb-2">Vragenreeks 1 (10 vragen)   </CardTitle>
+          <CardTitle className="text-3xl mb-2">Vragenreeks 1 (10 vragen)</CardTitle>
           <CardDescription className="text-lg">
             Test je kennis met {originalQuestions.length} meerkeuzevragen
           </CardDescription>
@@ -339,7 +339,7 @@ export default function Quiz() {
                 isSelected && "border-primary bg-accent",
               )}
             >
-              <div className="flex items-center gap-3">
+              <div className="flex items-start gap-3">
                 <span
                   className={cn(
                     "flex items-center justify-center w-8 h-8 rounded-full border-2 font-semibold text-sm flex-shrink-0",
@@ -349,7 +349,7 @@ export default function Quiz() {
                 >
                   {option.label}
                 </span>
-                <span className="flex-1 text-base leading-relaxed">{option.text}</span>
+                <span className="flex-1 text-base leading-relaxed break-words">{option.text}</span>
               </div>
             </button>
           )
