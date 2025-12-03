@@ -53,10 +53,12 @@ const qWithImage = (
 const qWithImageAnswers = (
   id: number,
   question: string,
-  imageA: string,
-  imageB: string,
-  imageC: string,
   correct: "a" | "b" | "c",
+  optionImages: {
+    a?: string
+    b?: string
+    c?: string
+  },
   questionImage?: string,
 ): Question => ({
   id,
@@ -66,11 +68,7 @@ const qWithImageAnswers = (
     b: "",
     c: "",
   },
-  optionImages: {
-    a: imageA,
-    b: imageB,
-    c: imageC,
-  },
+  optionImages,
   correct,
   hasImage: !!questionImage,
   image: questionImage,
@@ -1201,7 +1199,7 @@ export const questionSets: QuestionSet[] = [
         'Bij het gebruik van de "Tune" knop letten we er steeds op dat:',
         "de tune of afstemmingsindicator zoveel mogelijk naar rechts is gedraaid",
         "zoveel mogelijk centraal staat",
-        "de indicator zoveel mogelijk uitwijking vertoont",
+        "de indicator zoveer mogelijk uitwijking vertoont",
         "c",
       ),
       q(
@@ -1520,46 +1518,31 @@ export const questionSets: QuestionSet[] = [
         "is de radarwaarnemer de schipper, hij geeft korte en duidelijke bevelen",
         "c",
       ),
-      qWithImageAnswers(
-        189,
-        "Om het beeld te centreren / decentreren maakt men gebruik van volgende knop:",
-        "/images/antwoord%20A-189%20en%20190.png",
-        "/images/antwoord%20B-189%20en%20190.png",
-        "/images/antwoord%20C-189%20en%20190.png",
-        "c",
-      ),
-      qWithImageAnswers(
-        190,
-        "Om de koersflits te onderdrukken maakt men gebruik van volgende knop:",
-        "/images/antwoord%20A-189%20en%20190.png",
-        "/images/antwoord%20B-189%20en%20190.png",
-        "/images/antwoord%20C-189%20en%20190.png",
-        "b",
-      ),
-      qWithImageAnswers(
-        191,
-        "Interference rejector wordt vaak als volg afgebeeld",
-        "/images/antwoord%20A-191%20en%20192%20en%20193.png",
-        "/images/antwoord%20B-191%20en%20192%20en%20193.png",
-        "/images/antwoord%20C-191%20en%20192%20en%20193.png",
-        "a",
-      ),
-      qWithImageAnswers(
-        192,
-        "Electronic bearing line wordt vaak als volg afgebeeld",
-        "/images/antwoord%20A-191%20en%20192%20en%20193.png",
-        "/images/antwoord%20B-191%20en%20192%20en%20193.png",
-        "/images/antwoord%20C-191%20en%20192%20en%20193.png",
-        "c",
-      ),
-      qWithImageAnswers(
-        193,
-        "Variable range marker wordt vaak als volg afgebeeld",
-        "/images/antwoord%20A-191%20en%20192%20en%20193.png",
-        "/images/antwoord%20B-191%20en%20192%20en%20193.png",
-        "/images/antwoord%20C-191%20en%20192%20en%20193.png",
-        "b",
-      ),
+      qWithImageAnswers(189, "Om het beeld te centreren / decentreren maakt men gebruik van volgende knop:", "c", {
+        a: "/images/antwoord-a-189-en-190.png",
+        b: "/images/antwoord-b-189-en-190.png",
+        c: "/images/antwoord-c-189-en-190.png",
+      }),
+      qWithImageAnswers(190, "Om de koersflits te onderdrukken maakt men gebruik van volgende knop:", "b", {
+        a: "/images/antwoord-a-189-en-190.png",
+        b: "/images/antwoord-b-189-en-190.png",
+        c: "/images/antwoord-c-189-en-190.png",
+      }),
+      qWithImageAnswers(191, "Interference rejector wordt vaak als volg afgebeeld:", "a", {
+        a: "/images/antwoord-a-191-en-192-en-193.png",
+        b: "/images/antwoord-b-191-en-192-en-193.png",
+        c: "/images/antwoord-c-191-en-192-en-193.png",
+      }),
+      qWithImageAnswers(192, "Electronic bearing line wordt vaak als volg afgebeeld:", "c", {
+        a: "/images/antwoord-a-191-en-192-en-193.png",
+        b: "/images/antwoord-b-191-en-192-en-193.png",
+        c: "/images/antwoord-c-191-en-192-en-193.png",
+      }),
+      qWithImageAnswers(193, "Variable range marker wordt vaak als volg afgebeeld:", "b", {
+        a: "/images/antwoord-a-191-en-192-en-193.png",
+        b: "/images/antwoord-b-191-en-192-en-193.png",
+        c: "/images/antwoord-c-191-en-192-en-193.png",
+      }),
       q(
         194,
         "Radar is de afkorting voor",

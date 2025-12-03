@@ -2,10 +2,12 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { CheckCircle2, XCircle, RotateCcw, Shuffle, ChevronLeft, AlertCircle } from "lucide-react"
+import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Label } from "@/components/ui/label"
+import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import { Checkbox } from "@/components/ui/checkbox"
+import { CheckCircle2, XCircle, RotateCcw, Shuffle, ChevronLeft, AlertCircle } from "lucide-react"
 import { questionSets, type Question, type QuestionSet } from "@/lib/questions-data"
 import {
   saveQuizResult,
@@ -39,7 +41,13 @@ function shuffleArray<T>(array: T[]): T[] {
 
 function convertQuestions(questions: Question[]): any[] {
   return questions
-    .filter((q) => q && q.options && q.options.a && q.options.b && q.options.c)
+    .filter((q) => {
+      if (!q || !q.options) return false
+      // Allow if has regular text options OR has optionImages
+      const hasTextOptions = q.options.a && q.options.b && q.options.c
+      const hasImageOptions = q.optionImages && (q.optionImages.a || q.optionImages.b || q.optionImages.c)
+      return hasTextOptions || hasImageOptions
+    })
     .map((q) => ({
       ...q,
       options: [
@@ -130,7 +138,6 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
     if (!username || isAnonymous) return
     try {
       const allProgress = await getAllQuizProgress(username)
-      console.log("[v0] All series progress loaded:", allProgress)
       setSeriesProgress(allProgress)
     } catch (error) {
       console.error("[v0] Error loading series progress:", error)
@@ -211,11 +218,9 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
       try {
         // Load incorrect question IDs
         const incorrectIds = await getIncorrectQuestions(username)
-        console.log("[v0] Loaded incorrect question IDs:", incorrectIds)
 
         // Get the actual questions using those IDs
         const incorrectQuestions = getQuestionsByIds(incorrectIds)
-        console.log("[v0] Loaded incorrect questions:", incorrectQuestions.length)
 
         setSelectedSet({
           id: "wrong-answers",
@@ -410,10 +415,13 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
     return (
       <Card className="border-2 mx-auto mt-4 sm:mt-8">
         <CardHeader className="text-center pb-4">
-          <CardTitle className="text-lg sm:text-xl lg:text-2xl mb-2">Doorgaan waar je was gebleven?</CardTitle>
-          <CardDescription className="text-sm sm:text-base">
-            Je hebt een onvoltooide quiz voor {progress.setName}
-          </CardDescription>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs sm:text-sm font-medium text-muted-foreground">
+              Vraag {progress.currentQuestion + 1} van {progress.answers?.length || 0}
+            </span>
+          </div>
+          <Progress value={(progress.currentQuestion + 1) / (progress.answers?.length || 1)} className="w-full" />
+          <h3 className="text-base sm:text-lg lg:text-xl leading-relaxed mt-4">{progress.setName}</h3>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="p-3 sm:p-4 rounded-lg bg-muted/50 space-y-2">
@@ -448,7 +456,7 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
     return (
       <Card className="border-2">
         <CardHeader className="text-center pb-4">
-          <CardTitle className="text-lg sm:text-xl lg:text-2xl mb-2">Kies een vragenreeks</CardTitle>
+          <h3 className="text-base sm:text-lg lg:text-xl leading-relaxed">Kies een vragenreeks</h3>
         </CardHeader>
         <CardContent className="space-y-2 sm:space-y-3">
           {!isAnonymous && username && wrongAnswersCount > 0 && (
@@ -514,38 +522,36 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
     return (
       <Card className="border-2">
         <CardHeader className="text-center pb-4">
-          <CardTitle className="text-lg sm:text-xl lg:text-2xl mb-2">{selectedSetDetails.name}</CardTitle>
-          <CardDescription className="text-sm sm:text-base lg:text-lg">
+          <h3 className="text-base sm:text-lg lg:text-xl leading-relaxed">{selectedSetDetails.name}</h3>
+          <p className="text-sm sm:text-base lg:text-lg mt-2">
             {selectedSetDetails.description} - {selectedSetDetails.questions.length} meerkeuzevragen
-          </CardDescription>
+          </p>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-3">
             <div className="flex items-center space-x-2 p-4 rounded-lg bg-muted/50">
-              <Checkbox
-                id="shuffle-questions"
-                checked={isShuffleQuestions}
-                onCheckedChange={(checked) => setIsShuffleQuestions(checked === true)}
-              />
-              <label
-                htmlFor="shuffle-questions"
-                className="text-sm sm:text-base font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-              >
-                Shuffle vragen (willekeurige volgorde van vragen)
-              </label>
+              <RadioGroup defaultValue="off" className="flex items-center space-x-2">
+                <RadioGroupItem
+                  value="on"
+                  checked={isShuffleQuestions}
+                  onCheckedChange={() => setIsShuffleQuestions(true)}
+                />
+                <Label htmlFor="shuffle-questions" className="text-sm sm:text-base font-medium leading-none">
+                  Shuffle vragen (willekeurige volgorde van vragen)
+                </Label>
+              </RadioGroup>
             </div>
             <div className="flex items-center space-x-2 p-4 rounded-lg bg-muted/50">
-              <Checkbox
-                id="shuffle-answers"
-                checked={isShuffleAnswers}
-                onCheckedChange={(checked) => setIsShuffleAnswers(checked === true)}
-              />
-              <label
-                htmlFor="shuffle-answers"
-                className="text-sm sm:text-base font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-              >
-                Shuffle antwoorden (willekeurige volgorde van a, b, c)
-              </label>
+              <RadioGroup defaultValue="off" className="flex items-center space-x-2">
+                <RadioGroupItem
+                  value="on"
+                  checked={isShuffleAnswers}
+                  onCheckedChange={() => setIsShuffleAnswers(true)}
+                />
+                <Label htmlFor="shuffle-answers" className="text-sm sm:text-base font-medium leading-none">
+                  Shuffle antwoorden (willekeurige volgorde van a, b, c)
+                </Label>
+              </RadioGroup>
             </div>
           </div>
         </CardContent>
@@ -573,8 +579,8 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
     return (
       <Card className="border-2">
         <CardHeader className="text-center pb-4">
-          <CardTitle className="text-xl sm:text-2xl lg:text-3xl mb-2">Quiz Voltooid!</CardTitle>
-          <CardDescription className="text-sm sm:text-base lg:text-lg">Je hebt de quiz afgerond</CardDescription>
+          <h3 className="text-xl sm:text-2xl lg:text-3xl mb-2">Quiz Voltooid!</h3>
+          <p className="text-sm sm:text-base lg:text-lg">Je hebt de quiz afgerond</p>
         </CardHeader>
         <CardContent className="space-y-4 sm:space-y-6">
           <div className="text-center py-4 sm:py-8">
@@ -678,15 +684,8 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
             Vraag {currentQuestion + 1} van {questions.length}
           </span>
         </div>
-        <div className="w-full bg-secondary rounded-full h-1.5 sm:h-2 mb-3 sm:mb-4">
-          <div
-            className="bg-primary h-1.5 sm:h-2 rounded-full transition-all duration-300"
-            style={{ width: `${((currentQuestion + 1) / questions.length) * 100}%` }}
-          />
-        </div>
-        <CardTitle className="text-base sm:text-lg lg:text-xl leading-relaxed">
-          {questions[currentQuestion].question}
-        </CardTitle>
+        <Progress value={(currentQuestion + 1) / questions.length} className="w-full" />
+        <h3 className="text-base sm:text-lg lg:text-xl leading-relaxed mt-4">{questions[currentQuestion].question}</h3>
         {questions[currentQuestion].image ? (
           <div className="mt-3 sm:mt-4 p-3 sm:p-4 bg-muted rounded-lg border">
             <img
@@ -736,35 +735,30 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
                   {option.label}
                 </span>
                 {hasImageAnswer ? (
-                  <div className="flex-1">
+                  <div className="p-3 sm:p-4 rounded-lg border">
                     <img
                       src={hasImageAnswer || "/placeholder.svg"}
                       alt={`Antwoord ${option.label}`}
-                      className="max-h-20 sm:max-h-24 max-w-full object-contain"
+                      className="max-w-full sm:max-w-xs h-auto mx-auto max-h-24 sm:max-h-32 object-contain"
                     />
                   </div>
                 ) : (
-                  <span
-                    className="flex-1 text-sm sm:text-base leading-relaxed break-words overflow-wrap-anywhere min-w-0 hyphens-auto"
-                    lang="nl"
-                  >
-                    {option.text}
-                  </span>
+                  <span className="text-base sm:text-lg">{option.text}</span>
                 )}
               </div>
             </button>
           )
         })}
       </CardContent>
-      <CardFooter className="flex flex-col sm:flex-row gap-2 sm:gap-4 pt-4">
+      <CardFooter className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-4 pt-4">
+        <Button onClick={handleNext} disabled={!selectedAnswer} className="w-full sm:flex-1">
+          {currentQuestion < questions.length - 1 ? "Volgende Vraag" : "Bekijk Resultaten"}
+        </Button>
         {username && username !== "anonymous" && (
           <Button onClick={handleStopQuiz} variant="outline" className="w-full sm:w-auto bg-transparent">
             Stop Reeks
           </Button>
         )}
-        <Button onClick={handleNext} disabled={!selectedAnswer} className="w-full sm:flex-1">
-          {currentQuestion < questions.length - 1 ? "Volgende Vraag" : "Bekijk Resultaten"}
-        </Button>
       </CardFooter>
     </Card>
   )
