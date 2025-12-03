@@ -437,14 +437,14 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
             </p>
           </div>
         </CardContent>
-        <CardFooter className="flex flex-col sm:flex-row gap-2 pt-4">
-          <Button onClick={handleCancelResume} variant="outline" className="w-full sm:flex-1 bg-transparent sm:order-1">
+        <CardFooter className="flex flex-col gap-2 pt-4">
+          <Button onClick={handleCancelResume} variant="outline" className="w-full bg-transparent">
             Terug
           </Button>
-          <Button onClick={handleStartFresh} variant="outline" className="w-full sm:flex-1 bg-transparent sm:order-2">
+          <Button onClick={handleStartFresh} variant="outline" className="w-full bg-transparent">
             Opnieuw Beginnen
           </Button>
-          <Button onClick={handleResumeProgress} className="w-full sm:flex-1 sm:order-3">
+          <Button onClick={handleResumeProgress} className="w-full">
             Doorgaan
           </Button>
         </CardFooter>
@@ -555,14 +555,14 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
             </div>
           </div>
         </CardContent>
-        <CardFooter className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-4">
-          <Button onClick={handleBackToSets} variant="outline" className="w-full sm:w-auto bg-transparent sm:order-1">
-            <ChevronLeft className="w-4 h-4 mr-2" />
-            Terug
-          </Button>
-          <Button onClick={handleStartQuiz} className="w-full sm:flex-1 sm:order-2" size="lg">
+        <CardFooter className="flex flex-col gap-3 pt-4">
+          <Button onClick={handleStartQuiz} className="w-full" size="lg">
             {(isShuffleQuestions || isShuffleAnswers) && <Shuffle className="w-4 h-4 mr-2" />}
             Start Reeks
+          </Button>
+          <Button onClick={handleBackToSets} variant="outline" className="w-full bg-transparent">
+            <ChevronLeft className="w-4 h-4 mr-2" />
+            Terug
           </Button>
         </CardFooter>
       </Card>
@@ -661,13 +661,13 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
             })}
           </div>
         </CardContent>
-        <CardFooter className="flex flex-col sm:flex-row gap-2 sm:gap-4 pt-4">
-          <Button onClick={handleRestart} variant="outline" className="w-full sm:w-auto bg-transparent">
+        <CardFooter className="flex flex-col gap-2 sm:gap-4 pt-4">
+          <Button onClick={handleRestart} variant="outline" className="w-full bg-transparent">
             <RotateCcw className="w-4 h-4 mr-2" />
             Terug
           </Button>
           {hasNextSet && (
-            <Button onClick={handleContinueToNextSet} className="w-full sm:flex-1">
+            <Button onClick={handleContinueToNextSet} className="w-full">
               Volgende Reeks
             </Button>
           )}
@@ -750,15 +750,15 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
           )
         })}
       </CardContent>
-      <CardFooter className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-4 pt-4">
+      <CardFooter className="flex flex-col gap-2 pt-4">
+        <Button onClick={handleNext} disabled={!selectedAnswer} className="w-full">
+          {currentQuestion < questions.length - 1 ? "Volgende Vraag" : "Bekijk Resultaten"}
+        </Button>
         {username && username !== "anonymous" && (
-          <Button onClick={handleStopQuiz} variant="outline" className="w-full sm:w-auto bg-transparent">
+          <Button onClick={handleStopQuiz} variant="outline" className="w-full bg-transparent">
             Stop Reeks
           </Button>
         )}
-        <Button onClick={handleNext} disabled={!selectedAnswer} className="w-full sm:flex-1">
-          {currentQuestion < questions.length - 1 ? "Volgende Vraag" : "Bekijk Resultaten"}
-        </Button>
       </CardFooter>
     </Card>
   )
