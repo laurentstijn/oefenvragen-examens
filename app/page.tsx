@@ -22,8 +22,8 @@ export default function Page() {
   }
 
   return (
-    <main className="min-h-screen w-full bg-background relative">
-      <div className="absolute inset-0 pointer-events-none opacity-[1] hidden sm:block">
+    <main className="w-full bg-background relative">
+      <div className="absolute inset-0 pointer-events-none opacity-[1] hidden md:block">
         <div className="absolute top-[60%] left-[40%] -translate-x-1/2 -translate-y-1/2">
           <div className="w-[800px] h-[800px] rounded-full border-2 border-lime-400/60"></div>
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full border-2 border-lime-400/60"></div>
@@ -45,21 +45,21 @@ export default function Page() {
         </div>
       </div>
 
-      <div className="w-full px-2 sm:px-4 py-2 sm:py-3 relative z-10">
-        <div className="text-center mb-2 sm:mb-3">
-          <h1 className="text-base sm:text-lg md:text-xl font-bold text-foreground">Oefenvragen Examen Radar</h1>
+      <div className="w-full max-w-4xl mx-auto px-3 py-3 relative z-10">
+        <div className="text-center mb-3">
+          <h1 className="text-lg font-bold text-foreground">Oefenvragen Examen Radar</h1>
         </div>
 
         {loading ? (
-          <div className="text-center py-8 sm:py-12">
-            <p className="text-muted-foreground text-sm sm:text-base">Laden...</p>
+          <div className="text-center py-8">
+            <p className="text-muted-foreground">Laden...</p>
           </div>
         ) : !username ? (
           <AuthForm />
         ) : (
           <>
             {isAnonymous && (
-              <div className="mb-2 sm:mb-4">
+              <div className="mb-3">
                 <Button onClick={signOut} variant="outline" className="bg-transparent text-sm">
                   <ChevronLeft className="w-4 h-4 mr-2" />
                   Terug naar login

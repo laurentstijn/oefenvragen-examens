@@ -123,11 +123,10 @@
     @apply bg-background text-foreground;
   }
 
-  /* Removed all overflow:hidden and position:fixed to allow natural scrolling */
+  /* Completely removed overflow and height restrictions for natural iframe behavior */
   html,
   body {
     width: 100%;
-    min-height: 100%;
     margin: 0;
     padding: 0;
   }
