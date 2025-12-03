@@ -22,7 +22,7 @@ export default function Page() {
   }
 
   return (
-    <main className="h-screen w-screen bg-background relative overflow-hidden flex flex-col">
+    <main className="min-h-screen w-full bg-background relative">
       <div className="absolute inset-0 pointer-events-none opacity-[1] hidden sm:block">
         <div className="absolute top-[60%] left-[40%] -translate-x-1/2 -translate-y-1/2">
           <div className="w-[800px] h-[800px] rounded-full border-2 border-lime-400/60"></div>
@@ -45,7 +45,7 @@ export default function Page() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto w-full px-2 sm:px-4 py-2 sm:py-3 relative z-10">
+      <div className="w-full px-2 sm:px-4 py-2 sm:py-3 relative z-10">
         <div className="text-center mb-2 sm:mb-3">
           <h1 className="text-base sm:text-lg md:text-xl font-bold text-foreground">Oefenvragen Examen Radar</h1>
         </div>
