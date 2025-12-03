@@ -359,33 +359,35 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
   if (showResumeDialog && savedProgress) {
     const progress = savedProgress
     return (
-      <Card className="border-2 max-w-2xl mx-auto mt-8">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl mb-2">Doorgaan waar je was gebleven?</CardTitle>
-          <CardDescription className="text-base">Je hebt een onvoltooide quiz voor {progress.setName}</CardDescription>
+      <Card className="border-2 mx-auto mt-4 sm:mt-8">
+        <CardHeader className="text-center pb-4">
+          <CardTitle className="text-lg sm:text-xl lg:text-2xl mb-2">Doorgaan waar je was gebleven?</CardTitle>
+          <CardDescription className="text-sm sm:text-base">
+            Je hebt een onvoltooide quiz voor {progress.setName}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="p-4 rounded-lg bg-muted/50 space-y-2">
-            <p className="text-sm">
+          <div className="p-3 sm:p-4 rounded-lg bg-muted/50 space-y-2">
+            <p className="text-xs sm:text-sm">
               <span className="font-medium">Reeks:</span> {progress.setName}
             </p>
-            <p className="text-sm">
+            <p className="text-xs sm:text-sm">
               <span className="font-medium">Voortgang:</span> {progress.answers?.length || 0} van{" "}
-              {selectedSet?.questions.length || 0} vragen beantwoord
+              {progress.answers?.length || 0} vragen beantwoord
             </p>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs sm:text-sm text-muted-foreground">
               Laatst opgeslagen: {new Date(progress.timestamp).toLocaleString("nl-NL")}
             </p>
           </div>
         </CardContent>
-        <CardFooter className="flex flex-col md:flex-row gap-2">
-          <Button onClick={handleCancelResume} variant="outline" className="w-full md:flex-1 bg-transparent" size="lg">
+        <CardFooter className="flex flex-col sm:flex-row gap-2 pt-4">
+          <Button onClick={handleCancelResume} variant="outline" className="w-full sm:flex-1 bg-transparent">
             Terug
           </Button>
-          <Button onClick={handleStartFresh} variant="outline" className="w-full md:flex-1 bg-transparent" size="lg">
+          <Button onClick={handleStartFresh} variant="outline" className="w-full sm:flex-1 bg-transparent">
             Opnieuw Beginnen
           </Button>
-          <Button onClick={handleResumeProgress} className="w-full md:flex-1" size="lg">
+          <Button onClick={handleResumeProgress} className="w-full sm:flex-1">
             Doorgaan
           </Button>
         </CardFooter>
@@ -396,10 +398,10 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
   if (!selectedSet) {
     return (
       <Card className="border-2">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl mb-2">{"Kies een vragenreeks"}</CardTitle>
+        <CardHeader className="text-center pb-4">
+          <CardTitle className="text-lg sm:text-xl lg:text-2xl mb-2">Kies een vragenreeks</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-2 sm:space-y-3">
           {!isAnonymous && username && wrongAnswersQuestions.length > 0 && (
             <button
               onClick={() => handleSelectSet(null, true)}
@@ -409,11 +411,15 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
                     <AlertCircle className="w-5 h-5 text-orange-500" />
-                    <h3 className="font-semibold text-lg">Al mijn fouten</h3>
+                    <h3 className="font-semibold text-lg sm:text-xl">Al mijn fouten</h3>
                   </div>
-                  <p className="text-sm text-muted-foreground mt-1">Oefen alle vragen die je fout hebt gehad</p>
+                  <p className="text-sm sm:text-base text-muted-foreground mt-1">
+                    Oefen alle vragen die je fout hebt gehad
+                  </p>
                 </div>
-                <div className="text-sm font-medium text-orange-500">{wrongAnswersQuestions.length} vragen</div>
+                <div className="text-sm sm:text-base font-medium text-orange-500">
+                  {wrongAnswersQuestions.length} vragen
+                </div>
               </div>
             </button>
           )}
@@ -430,17 +436,21 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <h3 className="font-semibold text-lg">{set.name}</h3>
+                    <h3 className="font-semibold text-lg sm:text-xl">{set.name}</h3>
                     <div className="flex items-center gap-3 mt-1">
-                      {attemptCount > 0 && <p className="text-sm text-muted-foreground">{attemptCount}x geprobeerd</p>}
+                      {attemptCount > 0 && (
+                        <p className="text-sm sm:text-base text-muted-foreground">{attemptCount}x geprobeerd</p>
+                      )}
                       {progressInfo && progressInfo.answers && (
-                        <p className="text-sm font-medium text-orange-500">
+                        <p className="text-sm sm:text-base font-medium text-orange-500">
                           {progressInfo.answers.length}/{set.questions.length} beantwoord
                         </p>
                       )}
                     </div>
                   </div>
-                  <div className="text-sm font-medium text-muted-foreground">{set.questions.length} vragen</div>
+                  <div className="text-sm sm:text-base font-medium text-muted-foreground">
+                    {set.questions.length} vragen
+                  </div>
                 </div>
               </button>
             )
@@ -450,13 +460,16 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
     )
   }
 
+  const selectedSetId = selectedSet?.id
+  const selectedSetDetails = questionSets.find((set) => set.id === selectedSetId) || questionSets[0]
+
   if (!quizStarted) {
     return (
       <Card className="border-2">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl mb-2">{selectedSet.name}</CardTitle>
-          <CardDescription className="text-base">
-            {selectedSet.description} - {selectedSet.questions.length} meerkeuzevragen
+        <CardHeader className="text-center pb-4">
+          <CardTitle className="text-lg sm:text-xl lg:text-2xl mb-2">{selectedSetDetails.name}</CardTitle>
+          <CardDescription className="text-sm sm:text-base lg:text-lg">
+            {selectedSetDetails.description} - {selectedSetDetails.questions.length} meerkeuzevragen
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -469,7 +482,7 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
               />
               <label
                 htmlFor="shuffle-questions"
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                className="text-sm sm:text-base font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
               >
                 Shuffle vragen (willekeurige volgorde van vragen)
               </label>
@@ -482,19 +495,19 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
               />
               <label
                 htmlFor="shuffle-answers"
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                className="text-sm sm:text-base font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
               >
                 Shuffle antwoorden (willekeurige volgorde van a, b, c)
               </label>
             </div>
           </div>
         </CardContent>
-        <CardFooter className="flex gap-3">
-          <Button onClick={handleBackToSets} variant="outline" className="flex-1 bg-transparent">
+        <CardFooter className="flex gap-3 sm:gap-4 pt-4">
+          <Button onClick={handleBackToSets} variant="outline" className="w-full sm:w-auto bg-transparent">
             <ChevronLeft className="w-4 h-4 mr-2" />
             Terug
           </Button>
-          <Button onClick={handleStartQuiz} className="flex-1" size="lg">
+          <Button onClick={handleStartQuiz} className="w-full sm:flex-1" size="lg">
             {(isShuffleQuestions || isShuffleAnswers) && <Shuffle className="w-4 h-4 mr-2" />}
             Start Quiz
           </Button>
@@ -506,25 +519,25 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
   if (showResult) {
     const score = answers.filter((answer, idx) => answer === questions[idx].correctAnswer).length
     const percentage = Math.round((score / questions.length) * 100)
-
-    const currentSetIndex = questionSets.findIndex((set) => set.id === completedSetId)
-    const hasNextSet = !isWrongAnswersMode && currentSetIndex < questionSets.length - 1
+    const hasNextSet = selectedSet
+      ? questionSets.findIndex((set) => set.id === selectedSet.id) < questionSets.length - 1
+      : false
 
     return (
       <Card className="border-2">
-        <CardHeader className="text-center">
-          <CardTitle className="text-3xl mb-2">Quiz Voltooid!</CardTitle>
-          <CardDescription className="text-lg">Je hebt de quiz afgerond</CardDescription>
+        <CardHeader className="text-center pb-4">
+          <CardTitle className="text-xl sm:text-2xl lg:text-3xl mb-2">Quiz Voltooid!</CardTitle>
+          <CardDescription className="text-sm sm:text-base lg:text-lg">Je hebt de quiz afgerond</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="text-center py-8">
-            <div className="inline-flex items-center justify-center w-32 h-32 rounded-full bg-primary/10 mb-4">
-              <span className="text-5xl font-bold text-primary">{percentage}%</span>
+        <CardContent className="space-y-4 sm:space-y-6">
+          <div className="text-center py-4 sm:py-8">
+            <div className="inline-flex items-center justify-center w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-primary/10 mb-4">
+              <span className="text-3xl sm:text-4xl lg:text-5xl font-bold text-primary">{percentage}%</span>
             </div>
-            <p className="text-2xl font-semibold mb-2">
+            <p className="text-lg sm:text-xl lg:text-2xl font-semibold mb-2">
               {score} van de {questions.length} correct
             </p>
-            <p className="text-muted-foreground">
+            <p className="text-sm sm:text-base text-muted-foreground">
               {percentage >= 80 && "Uitstekend werk!"}
               {percentage >= 60 && percentage < 80 && "Goed gedaan!"}
               {percentage >= 40 && percentage < 60 && "Niet slecht, blijf oefenen!"}
@@ -532,8 +545,8 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
             </p>
           </div>
 
-          <div className="space-y-3">
-            <h3 className="font-semibold text-lg mb-3">Overzicht antwoorden:</h3>
+          <div className="space-y-2 sm:space-y-3">
+            <h3 className="font-semibold text-base sm:text-lg mb-3">Overzicht antwoorden:</h3>
             {questions.map((q, idx) => {
               const userAnswer = answers[idx]
               const isCorrectAnswer = userAnswer === q.correctAnswer
@@ -547,23 +560,23 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
                     isCorrectAnswer ? "bg-success/10 border-success/20" : "bg-destructive/10 border-destructive/20",
                   )}
                 >
-                  <div className="flex items-start gap-3 mb-3">
+                  <div className="flex items-start gap-3 sm:gap-4 mb-3">
                     <div className="mt-1">
                       {isCorrectAnswer ? (
-                        <CheckCircle2 className="w-5 h-5 text-success" />
+                        <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6 text-success" />
                       ) : (
-                        <XCircle className="w-5 h-5 text-destructive" />
+                        <XCircle className="w-5 h-5 sm:w-6 sm:h-6 text-destructive" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium mb-1">Vraag {idx + 1}</p>
-                      <p className="text-sm leading-relaxed">{q.question}</p>
+                      <p className="text-sm sm:text-base font-medium mb-1">Vraag {idx + 1}</p>
+                      <p className="text-sm sm:text-base leading-relaxed">{q.question}</p>
                     </div>
                   </div>
                   {!isCorrectAnswer && (
-                    <div className="ml-8 space-y-2 text-sm">
-                      <div className="flex items-start gap-2">
-                        <XCircle className="w-4 h-4 text-destructive mt-0.5 flex-shrink-0" />
+                    <div className="ml-8 sm:ml-10 space-y-2 text-sm sm:text-base">
+                      <div className="flex items-start gap-2 sm:gap-3">
+                        <XCircle className="w-4 h-4 sm:w-5 sm:h-5 text-destructive mt-0.5 flex-shrink-0" />
                         <div>
                           <span className="font-medium">Jouw antwoord:</span>
                           <p className="text-muted-foreground">
@@ -571,8 +584,8 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-start gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-success mt-0.5 flex-shrink-0" />
+                      <div className="flex items-start gap-2 sm:gap-3">
+                        <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-success mt-0.5 flex-shrink-0" />
                         <div>
                           <span className="font-medium">Correct antwoord:</span>
                           <p className="text-muted-foreground">
@@ -583,7 +596,7 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
                     </div>
                   )}
                   {isCorrectAnswer && (
-                    <div className="ml-8 text-sm">
+                    <div className="ml-8 sm:ml-10 text-sm sm:text-base">
                       <span className="font-medium text-success">Correct!</span>
                       <p className="text-muted-foreground">
                         {userAnswer}) {q.options.find((opt) => opt.label === userAnswer)?.text}
@@ -595,13 +608,13 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
             })}
           </div>
         </CardContent>
-        <CardFooter className="flex gap-3">
-          <Button onClick={handleRestart} variant="outline" className="flex-1 bg-transparent" size="lg">
+        <CardFooter className="flex flex-col sm:flex-row gap-2 sm:gap-4 pt-4">
+          <Button onClick={handleRestart} variant="outline" className="w-full sm:w-auto bg-transparent">
             <RotateCcw className="w-4 h-4 mr-2" />
             Opnieuw Proberen
           </Button>
           {hasNextSet && (
-            <Button onClick={handleContinueToNextSet} className="flex-1" size="lg">
+            <Button onClick={handleContinueToNextSet} className="w-full sm:flex-1">
               Volgende Reeks
             </Button>
           )}
@@ -611,36 +624,38 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
   }
 
   return (
-    <Card className="border-2 max-w-2xl mx-auto mt-4 sm:mt-6 md:mt-8">
-      <CardHeader>
+    <Card className="border-2 mx-auto mt-4 sm:mt-6">
+      <CardHeader className="pb-4">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-muted-foreground">
+          <span className="text-xs sm:text-sm font-medium text-muted-foreground">
             Vraag {currentQuestion + 1} van {questions.length}
           </span>
         </div>
-        <div className="w-full bg-secondary rounded-full h-2 mb-4">
+        <div className="w-full bg-secondary rounded-full h-1.5 sm:h-2 mb-3 sm:mb-4">
           <div
-            className="bg-primary h-2 rounded-full transition-all duration-300"
+            className="bg-primary h-1.5 sm:h-2 rounded-full transition-all duration-300"
             style={{ width: `${((currentQuestion + 1) / questions.length) * 100}%` }}
           />
         </div>
-        <CardTitle className="text-xl leading-relaxed">{questions[currentQuestion].question}</CardTitle>
+        <CardTitle className="text-base sm:text-lg lg:text-xl leading-relaxed">
+          {questions[currentQuestion].question}
+        </CardTitle>
         {questions[currentQuestion].image ? (
-          <div className="mt-4 p-4 bg-muted rounded-lg border">
+          <div className="mt-3 sm:mt-4 p-3 sm:p-4 bg-muted rounded-lg border">
             <img
               src={questions[currentQuestion].image || "/placeholder.svg"}
               alt="Vraag afbeelding"
-              className="max-w-xs h-auto mx-auto max-h-32 object-contain"
+              className="max-w-full sm:max-w-xs h-auto mx-auto max-h-24 sm:max-h-32 object-contain"
             />
           </div>
         ) : (
           questions[currentQuestion].hasImage && (
-            <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-              <p className="text-sm text-amber-900 dark:text-amber-100 font-medium">
+            <div className="mt-3 sm:mt-4 p-2.5 sm:p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+              <p className="text-xs sm:text-sm text-amber-900 dark:text-amber-100 font-medium">
                 ⚠️ Deze vraag bevat een afbeelding of symbool die momenteel niet beschikbaar is.
               </p>
               {questions[currentQuestion].imageNote && (
-                <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                <p className="text-xs sm:text-sm text-amber-700 dark:text-amber-300 mt-1">
                   {questions[currentQuestion].imageNote}
                 </p>
               )}
@@ -648,7 +663,7 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
           )
         )}
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-2 sm:space-y-3">
         {questions[currentQuestion].options.map((option) => {
           const isSelected = selectedAnswer === option.label
           const hasImageAnswer = questions[currentQuestion].optionImages?.[option.label as "a" | "b" | "c"]
@@ -658,15 +673,15 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
               key={option.label}
               onClick={() => handleAnswerClick(option.label)}
               className={cn(
-                "w-full text-left p-4 rounded-lg border-2 transition-all duration-200",
+                "w-full text-left p-3 sm:p-4 rounded-lg border-2 transition-all duration-200",
                 "hover:border-primary hover:bg-accent",
                 isSelected && "border-primary bg-accent",
               )}
             >
-              <div className="flex items-start gap-3">
+              <div className="flex items-start gap-2 sm:gap-3">
                 <span
                   className={cn(
-                    "flex items-center justify-center w-8 h-8 rounded-full border-2 font-semibold text-sm flex-shrink-0",
+                    "flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 font-semibold text-xs sm:text-sm flex-shrink-0",
                     isSelected && "border-primary bg-primary text-primary-foreground",
                     !isSelected && "border-border",
                   )}
@@ -678,12 +693,12 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
                     <img
                       src={hasImageAnswer || "/placeholder.svg"}
                       alt={`Antwoord ${option.label}`}
-                      className="max-h-24 max-w-full object-contain"
+                      className="max-h-20 sm:max-h-24 max-w-full object-contain"
                     />
                   </div>
                 ) : (
                   <span
-                    className="flex-1 text-base leading-relaxed break-words overflow-wrap-anywhere min-w-0 hyphens-auto"
+                    className="flex-1 text-sm sm:text-base leading-relaxed break-words overflow-wrap-anywhere min-w-0 hyphens-auto"
                     lang="nl"
                   >
                     {option.text}
@@ -694,13 +709,13 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
           )
         })}
       </CardContent>
-      <CardFooter className="flex gap-3">
+      <CardFooter className="flex flex-col sm:flex-row gap-2 sm:gap-4 pt-4">
         {username && username !== "anonymous" && (
-          <Button onClick={handleStopQuiz} variant="outline" className="bg-transparent" size="lg">
+          <Button onClick={handleStopQuiz} variant="outline" className="w-full sm:w-auto bg-transparent">
             Stop Reeks
           </Button>
         )}
-        <Button onClick={handleNext} disabled={!selectedAnswer} className="flex-1" size="lg">
+        <Button onClick={handleNext} disabled={!selectedAnswer} className="w-full sm:flex-1">
           {currentQuestion < questions.length - 1 ? "Volgende Vraag" : "Bekijk Resultaten"}
         </Button>
       </CardFooter>
