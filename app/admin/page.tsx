@@ -134,7 +134,7 @@ export default function AdminPage() {
                   className="mt-1"
                 />
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-col">
                 <Button type="submit" className="flex-1">
                   Toegang
                 </Button>
@@ -216,7 +216,7 @@ export default function AdminPage() {
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 space-y-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-mono text-sm font-semibold bg-muted px-2 py-1 rounded">#{question.id}</span>
                       <span className="text-sm text-muted-foreground">{question.setName}</span>
                       {editedQuestions.has(question.id) && (
@@ -277,7 +277,7 @@ export default function AdminPage() {
             </CardHeader>
             <CardContent className="flex-1 overflow-y-auto space-y-4">
               <p className="text-sm text-muted-foreground">
-                Kopieer onderstaande code en vervang de betreffende vragen in <code>lib/questions-data.ts</code>
+                Kopieer de code hieronder en plak deze in lib/questions-data.ts om de wijzigingen permanent te maken.
               </p>
 
               <div className="relative">

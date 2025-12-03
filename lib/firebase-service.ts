@@ -33,6 +33,18 @@ export interface QuizProgress {
   timestamp: number
 }
 
+export interface QuestionEdit {
+  id: number
+  question?: string
+  options?: {
+    a?: string
+    b?: string
+    c?: string
+  }
+  correct?: "a" | "b" | "c"
+  timestamp: number
+}
+
 async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder()
   const data = encoder.encode(password)
@@ -373,6 +385,55 @@ export async function setPasswordForUser(username: string, password: string): Pr
     console.log("[v0] Password set for existing user:", username)
   } catch (error) {
     console.error("[v0] Error setting password for user:", error)
+    throw error
+  }
+}
+
+export async function saveQuestionEdit(questionId: number, edits: Partial<QuestionEdit>): Promise<void> {
+  try {
+    const editRef = ref(db, `questionEdits/${questionId}`)
+    await set(editRef, {
+      id: questionId,
+      ...edits,
+      timestamp: Date.now(),
+    })
+    console.log("[v0] Question edit saved:", questionId)
+  } catch (error) {
+    console.error("[v0] Error saving question edit:", error)
+    throw error
+  }
+}
+
+export async function getQuestionEdits(): Promise<Map<number, QuestionEdit>> {
+  try {
+    const editsRef = ref(db, "questionEdits")
+    const snapshot = await get(editsRef)
+
+    if (!snapshot.exists()) {
+      return new Map()
+    }
+
+    const edits = new Map<number, QuestionEdit>()
+    snapshot.forEach((childSnapshot) => {
+      const edit = childSnapshot.val() as QuestionEdit
+      edits.set(edit.id, edit)
+    })
+
+    console.log("[v0] Loaded", edits.size, "question edits from Firebase")
+    return edits
+  } catch (error) {
+    console.error("[v0] Error getting question edits:", error)
+    return new Map()
+  }
+}
+
+export async function deleteQuestionEdit(questionId: number): Promise<void> {
+  try {
+    const editRef = ref(db, `questionEdits/${questionId}`)
+    await remove(editRef)
+    console.log("[v0] Question edit deleted:", questionId)
+  } catch (error) {
+    console.error("[v0] Error deleting question edit:", error)
     throw error
   }
 }

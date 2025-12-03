@@ -370,7 +370,14 @@ export const questionSets: QuestionSet[] = [
         "Zij gaan over in licht en worden direct nadien vernietigd",
         "b",
       ),
-      q(38, "Hoe is de kleinst mogelijke puntgrootte?", "1,5 vierkante mm", "0,5 vierkante mm", "2 vierkante mm", "a"),
+      q(
+        38,
+        "Hoe is de kleinst mogelijke puntgrootte?",  
+        "1,5 vierkante mm",
+        "0,5 vierkante mm",
+        "2 vierkante mm", 
+        "b",
+      ),
       q(
         39,
         "Hoeveel meter bedraagt het afstandsonderscheidingsvermogen van een rivierradar?",
@@ -815,7 +822,7 @@ export const questionSets: QuestionSet[] = [
         "De versterkingsknop van het radartoestel heeft volgende functie:",
         "hij regelt de lichtsterkte van de echo's op het scherm",
         "hij regelt het zendvermogen",
-        "hij regelt het zendvermogen van de zender",
+        "hij dient om ook de echo's, van kleine voorwerpen die op grote afstand liggen, zichtbaar te maken",
         "c",
       ),
     ],
@@ -1593,10 +1600,10 @@ export const questionSets: QuestionSet[] = [
       ),
       q(
         200,
-        'De radar aan boord van de "THEMIS II" heeft een frequentie van 9.410 MHz. Hoeveel bedraagt de golflengte?',
-        "3,18 cm",
-        "2,75 cm",
-        "3,00 cm",
+        'De radar aan boord van de "THEMIS II" heeft een frequentie van 9 735 MHz. Hoeveel bedraagt de golflengte?',
+        "de golflengte is groter dan 3cm",
+        "de golflengte is kleiner dan 3cm",
+        "de golflengte is gelijk aan 3cm",
         "a",
       ),
     ],
@@ -1926,7 +1933,8 @@ export const questionSets: QuestionSet[] = [
       ),
       q(
         246,
-        'Onder het begrip "relatieve koers" wordt verstaan: de richting en zin waarin de echo\'s van andere voorwerpen zich over het scherm verplaatsen. Hierdoor is de ware koers en snelheid van deze voorwerpen te bepalen',
+        "Onder het begrip RELATIEVE KOERS wordt verstaan: de richting en zin waarin de echo's van andere voorwerpen zich over het scherm verplaatsen.", 
+        "Hierdoor is de ware koers en snelheid van deze voorwerpen te bepalen",
         "Hierdoor is de ware koers en snelheid van deze voorwerpen niet te bepalen",
         "Hierdoor is de ware koers en snelheid van deze voorwerpen misschien te bepalen",
         "b",
@@ -1974,6 +1982,34 @@ export const questionSets: QuestionSet[] = [
     ],
   },
 ]
+
+import { getQuestionEdits } from "./firebase-service"
+
+export async function getAllQuestionsWithEdits(): Promise<Question[]> {
+  try {
+    const edits = await getQuestionEdits()
+    const allQuestions = questionSets.flatMap((set) => set.questions)
+
+    return allQuestions.map((q) => {
+      const edit = edits.get(q.id)
+      if (!edit) return q
+
+      return {
+        ...q,
+        question: edit.question || q.question,
+        options: {
+          a: edit.options?.a || q.options.a,
+          b: edit.options?.b || q.options.b,
+          c: edit.options?.c || q.options.c,
+        },
+        correct: edit.correct || q.correct,
+      }
+    })
+  } catch (error) {
+    console.error("[v0] Failed to load edits, using original questions:", error)
+    return questionSets.flatMap((set) => set.questions)
+  }
+}
 
 export function getQuestionsByIds(ids: number[]): Question[] {
   const allQuestions = questionSets.flatMap((set) => set.questions)
