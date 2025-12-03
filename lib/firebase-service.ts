@@ -246,7 +246,7 @@ export async function saveQuizProgress(progress: QuizProgress): Promise<void> {
     const progressRef = ref(db, `quizProgress/${progress.username}/${progress.setId}`)
     const cleanedProgress = {
       ...progress,
-      answers: progress.answers.map((answer) => (answer === null || answer === undefined ? "" : answer)),
+      answers: (progress.answers || []).map((answer) => (answer === null || answer === undefined ? "" : answer)),
       timestamp: Date.now(),
     }
     await set(progressRef, cleanedProgress)

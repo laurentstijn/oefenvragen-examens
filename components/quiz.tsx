@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
@@ -146,6 +146,10 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
 
   const saveProgress = async () => {
     if (!username || isAnonymous || !selectedSet) return
+    if (!answers || answers.length === 0) {
+      console.log("[v0] No progress to save")
+      return
+    }
     try {
       await saveQuizProgress({
         username,
@@ -174,6 +178,11 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
   }
 
   const handleStartFresh = () => {
+    if (username && !isAnonymous && savedProgress?.setId) {
+      clearQuizProgress(username, savedProgress.setId)
+    }
+    // Close the resume dialog and reset state
+    setSavedProgress(null)
     setIsShuffleQuestions(false)
     setIsShuffleAnswers(false)
     handleStartQuiz()
@@ -531,28 +540,27 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
         <CardContent className="space-y-6">
           <div className="space-y-3">
             <div className="flex items-center space-x-2 p-4 rounded-lg bg-muted/50">
-              <RadioGroup
-                value={isShuffleQuestions ? "on" : "off"}
-                onValueChange={(value) => setIsShuffleQuestions(value === "on")}
-                className="flex items-center space-x-2"
+              <Checkbox
+                id="shuffle-questions"
+                checked={isShuffleQuestions}
+                onCheckedChange={(checked) => setIsShuffleQuestions(checked === true)}
+              />
+              <Label
+                htmlFor="shuffle-questions"
+                className="text-sm sm:text-base font-medium leading-none cursor-pointer"
               >
-                <RadioGroupItem value="on" id="shuffle-questions" />
-                <Label htmlFor="shuffle-questions" className="text-sm sm:text-base font-medium leading-none">
-                  Shuffle vragen (willekeurige volgorde van vragen)
-                </Label>
-              </RadioGroup>
+                Shuffle vragen (willekeurige volgorde van vragen)
+              </Label>
             </div>
             <div className="flex items-center space-x-2 p-4 rounded-lg bg-muted/50">
-              <RadioGroup
-                value={isShuffleAnswers ? "on" : "off"}
-                onValueChange={(value) => setIsShuffleAnswers(value === "on")}
-                className="flex items-center space-x-2"
-              >
-                <RadioGroupItem value="on" id="shuffle-answers" />
-                <Label htmlFor="shuffle-answers" className="text-sm sm:text-base font-medium leading-none">
-                  Shuffle antwoorden (willekeurige volgorde van a, b, c)
-                </Label>
-              </RadioGroup>
+              <Checkbox
+                id="shuffle-answers"
+                checked={isShuffleAnswers}
+                onCheckedChange={(checked) => setIsShuffleAnswers(checked === true)}
+              />
+              <Label htmlFor="shuffle-answers" className="text-sm sm:text-base font-medium leading-none cursor-pointer">
+                Shuffle antwoorden (willekeurige volgorde van a, b, c)
+              </Label>
             </div>
           </div>
         </CardContent>
