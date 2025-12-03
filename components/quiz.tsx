@@ -438,13 +438,13 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
           </div>
         </CardContent>
         <CardFooter className="flex flex-col sm:flex-row gap-2 pt-4">
-          <Button onClick={handleCancelResume} variant="outline" className="w-full sm:flex-1 bg-transparent">
+          <Button onClick={handleCancelResume} variant="outline" className="w-full sm:flex-1 bg-transparent sm:order-1">
             Terug
           </Button>
-          <Button onClick={handleStartFresh} variant="outline" className="w-full sm:flex-1 bg-transparent">
+          <Button onClick={handleStartFresh} variant="outline" className="w-full sm:flex-1 bg-transparent sm:order-2">
             Opnieuw Beginnen
           </Button>
-          <Button onClick={handleResumeProgress} className="w-full sm:flex-1">
+          <Button onClick={handleResumeProgress} className="w-full sm:flex-1 sm:order-3">
             Doorgaan
           </Button>
         </CardFooter>
@@ -664,7 +664,7 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
         <CardFooter className="flex flex-col sm:flex-row gap-2 sm:gap-4 pt-4">
           <Button onClick={handleRestart} variant="outline" className="w-full sm:w-auto bg-transparent">
             <RotateCcw className="w-4 h-4 mr-2" />
-            Opnieuw Proberen
+            Terug
           </Button>
           {hasNextSet && (
             <Button onClick={handleContinueToNextSet} className="w-full sm:flex-1">
@@ -751,14 +751,14 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
         })}
       </CardContent>
       <CardFooter className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-4 pt-4">
-        <Button onClick={handleNext} disabled={!selectedAnswer} className="w-full sm:flex-1">
-          {currentQuestion < questions.length - 1 ? "Volgende Vraag" : "Bekijk Resultaten"}
-        </Button>
         {username && username !== "anonymous" && (
           <Button onClick={handleStopQuiz} variant="outline" className="w-full sm:w-auto bg-transparent">
             Stop Reeks
           </Button>
         )}
+        <Button onClick={handleNext} disabled={!selectedAnswer} className="w-full sm:flex-1">
+          {currentQuestion < questions.length - 1 ? "Volgende Vraag" : "Bekijk Resultaten"}
+        </Button>
       </CardFooter>
     </Card>
   )

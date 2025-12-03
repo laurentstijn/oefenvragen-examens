@@ -4,8 +4,9 @@ import Quiz from "@/components/quiz"
 import { AuthForm } from "@/components/auth-form"
 import { UserStatsPanel } from "@/components/user-stats"
 import { useAuth } from "@/contexts/auth-context"
-import { ChevronLeft } from "lucide-react"
+import { ChevronLeft, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import Link from "next/link"
 
 export default function Page() {
   const { username, loading, isAnonymous, signOut } = useAuth()
@@ -46,8 +47,16 @@ export default function Page() {
       </div>
 
       <div className="w-full max-w-4xl mx-auto px-3 py-3 relative z-10">
-        <div className="text-center mb-3">
-          <h1 className="text-lg font-bold text-foreground">Oefenvragen Examen Radar</h1>
+        <div className="relative mb-3">
+          <h1 className="text-lg font-bold text-foreground text-center">Oefenvragen Examen Radar</h1>
+          {username && (
+            <Link href="/admin" className="absolute right-0 top-0">
+              <Button variant="outline" size="sm" className="gap-2 bg-transparent">
+                <Settings className="w-4 h-4" />
+                Admin
+              </Button>
+            </Link>
+          )}
         </div>
 
         {loading ? (
