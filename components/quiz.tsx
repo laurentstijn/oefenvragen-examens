@@ -650,6 +650,7 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
       <CardContent className="space-y-3">
         {questions[currentQuestion].options.map((option) => {
           const isSelected = selectedAnswer === option.label
+          const hasImageAnswer = questions[currentQuestion].optionImages?.[option.label as "a" | "b" | "c"]
 
           return (
             <button
@@ -671,12 +672,22 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
                 >
                   {option.label}
                 </span>
-                <span
-                  className="flex-1 text-base leading-relaxed break-words overflow-wrap-anywhere min-w-0 hyphens-auto"
-                  lang="nl"
-                >
-                  {option.text}
-                </span>
+                {hasImageAnswer ? (
+                  <div className="flex-1">
+                    <img
+                      src={hasImageAnswer || "/placeholder.svg"}
+                      alt={`Antwoord ${option.label}`}
+                      className="max-h-24 max-w-full object-contain"
+                    />
+                  </div>
+                ) : (
+                  <span
+                    className="flex-1 text-base leading-relaxed break-words overflow-wrap-anywhere min-w-0 hyphens-auto"
+                    lang="nl"
+                  >
+                    {option.text}
+                  </span>
+                )}
               </div>
             </button>
           )

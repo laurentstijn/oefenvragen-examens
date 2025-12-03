@@ -6,6 +6,11 @@ export interface Question {
     b: string
     c: string
   }
+  optionImages?: {
+    a?: string
+    b?: string
+    c?: string
+  }
   correct: "a" | "b" | "c"
   hasImage?: boolean
   image?: string // Changed from imageNote to image for clarity with the update
@@ -42,6 +47,32 @@ const qWithImage = (
   correct,
   hasImage: true,
   image, // Updated to use the 'image' parameter
+})
+
+const qWithImageAnswers = (
+  id: number,
+  question: string,
+  imageA: string,
+  imageB: string,
+  imageC: string,
+  correct: "a" | "b" | "c",
+  questionImage?: string,
+): Question => ({
+  id,
+  question,
+  options: {
+    a: `Optie A`,
+    b: `Optie B`,
+    c: `Optie C`,
+  },
+  optionImages: {
+    a: imageA,
+    b: imageB,
+    c: imageC,
+  },
+  correct,
+  hasImage: !!questionImage,
+  image: questionImage,
 })
 
 export const questionSets: QuestionSet[] = [
@@ -1213,7 +1244,7 @@ export const questionSets: QuestionSet[] = [
       ),
       qWithImage(
         153,
-        "Geef de betekenis van volgende knop: (STAND-BY)",
+        "Geef de betekenis van volgende knop:",
         "het toestel staat op OFF",
         "het toestel staat op ON",
         "het toestel staat op STAND – BY",
@@ -1222,7 +1253,7 @@ export const questionSets: QuestionSet[] = [
       ),
       qWithImage(
         154,
-        "De ON knop op een radar heeft als functie:",
+        "Geef de betekenis van volgende knop:",
         "het toestel staat op OFF",
         "het toestel staat op ON",
         "het toestel staat op STAND – BY",
@@ -1253,12 +1284,36 @@ export const questionSets: QuestionSet[] = [
         "dan is het toestel in bedrijf, het zenden en ontvangen is bezig",
         "b",
       ),
-      qWithImage(158, "Dit symbool staat voor:", "brilliance", "range", "panel", "a", "/images/vraag-158.png"),
-      qWithImage(159, "Dit symbool staat voor: (range)", "brilliance", "range", "panel", "b", "/images/vraag-159.png"),
-      qWithImage(160, "Dit symbool staat voor: (panel)", "brilliance", "range", "panel", "c", "/images/vraag-160.png"),
+      qWithImage(
+        158, 
+        "Dit symbool staat voor:", 
+        "brilliance", 
+        "range", 
+        "panel", 
+        "a", 
+        "/images/vraag-158.png",
+      ),
+      qWithImage(
+        159, 
+        "Dit symbool staat voor:", 
+        "brilliance", 
+        "range", 
+        "panel", 
+        "b", 
+        "/images/vraag-159.png",
+      ),
+      qWithImage(
+        160, 
+        "Dit symbool staat voor:", 
+        "brilliance", 
+        "range", 
+        "panel", 
+        "c", 
+        "/images/vraag-160.png",
+      ),
       q(
         161,
-        "Het doel van de brilliance is",
+        "Het doel van de brilliance is?",
         "op oudere toestellen de helderheid van het videobeeld, op rasterscan de instelling van het raster",
         "op oudere toestellen het rooster negatief maken, op rasterscan de helderheid van het videobeeld",
         'op rasterscan toestellen het negatief maken van het rooster, hierdoor komt het toestel in een "lektoestand"',
@@ -1266,7 +1321,7 @@ export const questionSets: QuestionSet[] = [
       ),
       qWithImage(
         162,
-        "Met deze knop stel je (tuning)",
+        "Met deze knop stel je?",
         "de zender af op de ontvanger",
         "de lengte van de impuls in",
         "de ontvanger af op de zender",
@@ -1275,7 +1330,7 @@ export const questionSets: QuestionSet[] = [
       ),
       qWithImage(
         163,
-        "Met deze knop stel je (pulse length)",
+        "Met deze knop stel je?",
         "de zender af op de ontvanger",
         "de lengte van de impuls in",
         "de ontvanger af op de zender",
@@ -1300,7 +1355,7 @@ export const questionSets: QuestionSet[] = [
       ),
       qWithImage(
         166,
-        "Met deze knop regelt men (gain)",
+        "Met deze knop regelt men?",
         "de onderdrukking van regen",
         "de versterking van de echo's",
         "de onderdrukking van golven",
@@ -1309,20 +1364,21 @@ export const questionSets: QuestionSet[] = [
       ),
       qWithImage(
         167,
-        "Met deze knop regelt men (sea clutter)",
+        "Met deze knop regelt men?",
         "de onderdrukking van regen",
         "de versterking van de echo's",
         "de onderdrukking van golven",
         "c",
         "/images/vraag-167.png",
       ),
-      q(
+      qWithImage(
         168,
-        "Met deze knop regelt men (rain clutter)",
+        "Met deze knop regelt men?",
         "de onderdrukking van regen",
         "de versterking van de echo's",
         "de onderdrukking van golven",
         "a",
+        "/images/vraag-168.png",
       ),
       q(
         169,
@@ -1340,21 +1396,23 @@ export const questionSets: QuestionSet[] = [
         "wordt de tijdbasis van zaagtandgenerator, de helderheid en de versterking van het beeld gewijzigd",
         "a",
       ),
-      q(
+      qWithImage(
         171,
-        "Als dit symbool zichtbaar is (North-up)",
+        "Als dit symbool zichtbaar is?",
         "staat het toestel in True-motion presentatie",
         "staat het toestel in North-up presentatie",
         "staat het toestel in Ship's head-up presentatie",
         "b",
+        "/images/vraag-171.png",
       ),
-      q(
+      qWithImage(
         172,
-        "Als dit symbool zichtbaar is (Ship's head-up)",
+        "Als dit symbool zichtbaar is?",
         "staat het toestel in True-motion presentatie",
         "staat het toestel in North-up presentatie",
         "staat het toestel in Ship's head-up presentatie",
         "c",
+        "/images/vraag-172.png",
       ),
       q(
         173,
@@ -1485,24 +1543,53 @@ export const questionSets: QuestionSet[] = [
         "c",
       ),
       q(
-        189,
-        "Om het beeld te centreren / decentreren maakt men gebruik van volgende knop:",
-        "Center/Decenter knop",
-        "HM/SHM knop",
-        "Range knop",
+        188,
+        "Wat betekent RM (radar mile)",
+        "de tijd die een radio golf nodig heeft om 1 zeemijl heen en terug af te leggen",
+        "de tijd die een radar golf nodig heeft om 1 zeemijl heen en terug af te leggen",
+        "de tijd die een geluidsgolf nodig heeft om 1 zeemijl heen en terug af te leggen",
         "c",
       ),
-      q(
+      qWithImageAnswers(
+        189,
+        "Om het beeld te centreren / decentreren maakt men gebruik van volgende knop:",
+        "/images/antwoord A-189 en 190.png",
+        "/images/antwoord B-189 en 190.png",
+        "/images/antwoord C-189 en 190.png",
+        "a",
+      ),
+      qWithImageAnswers(
         190,
         "Om de koersflits te onderdrukken maakt men gebruik van volgende knop:",
-        "Center/Decenter knop",
-        "HM/SHM knop",
-        "Range knop",
+        "/images/antwoord A-189 en 190.png",
+        "/images/antwoord B-189 en 190.png",
+        "/images/antwoord C-189 en 190.png",
         "b",
       ),
-      q(191, "Interference rejector wordt vaak als volg afgebeeld", "IR symbool", "EBL symbool", "VRM symbool", "a"),
-      q(192, "Electronic bearing line wordt vaak als volg afgebeeld", "IR symbool", "EBL symbool", "VRM symbool", "c"),
-      q(193, "Variable range marker wordt vaak als volg afgebeeld", "IR symbool", "EBL symbool", "VRM symbool", "b"),
+      qWithImageAnswers(
+        191,
+        "Interference rejector wordt vaak als volg afgebeeld",
+        "/images/antwoord A-191 en 192 en 193.png",
+        "/images/antwoord B-191 en 192 en 193.png",
+        "/images/antwoord C-191 en 192 en 193.png",
+        "a",
+      ),
+      qWithImageAnswers(
+        192,
+        "Electronic bearing line wordt vaak als volg afgebeeld",
+        "/images/antwoord A-191 en 192 en 193.png",
+        "/images/antwoord B-191 en 192 en 193.png",
+        "/images/antwoord C-191 en 192 en 193.png",
+        "c",
+      ),
+      qWithImageAnswers(
+        193,
+        "Variable range marker wordt vaak als volg afgebeeld",
+        "/images/antwoord A-191 en 192 en 193.png",
+        "/images/antwoord B-191 en 192 en 193.png",
+        "/images/antwoord C-191 en 192 en 193.png",
+        "b",
+      ),
       q(
         194,
         "Radar is de afkorting voor",
@@ -1566,7 +1653,14 @@ export const questionSets: QuestionSet[] = [
     name: "Reeks 5",
     description: "",
     questions: [
-      q(201, 'De radar aan boord van de "THEMIS II" zend uit in de', "S-band", "X-band", "X- en S-band", "b"),
+      q(
+        201, 
+        "De radar aan boord van de "THEMIS II" zend uit in de:",
+        "S-band", 
+        "X-band", 
+        "X- en S-band", 
+        "b",
+      ),
       q(
         202,
         "Radar is een engelse afkorting en staat voor:",
@@ -1583,7 +1677,14 @@ export const questionSets: QuestionSet[] = [
         "300.000 km/s",
         "c",
       ),
-      q(204, "Het aantal golven opgewekt per seconden noemen we:", "golflengte", "frequentie", "amplitude", "b"),
+      q(
+        204, 
+        "Het aantal golven opgewekt per seconden noemen we:",
+        "golflengte",
+        "frequentie", 
+        "amplitude", 
+        "b",
+      ),
       q(
         205,
         "Een Hz (Hertz) is gelijk aan:",
@@ -1592,7 +1693,14 @@ export const questionSets: QuestionSet[] = [
         "1 golf per seconden",
         "c",
       ),
-      q(206, "Frequentie X golflengte =", "amplitude", "voortplantingssnelheid", "golfperiode", "b"),
+      q(
+        206, 
+        "Frequentie X golflengte =", 
+        "amplitude", 
+        "voortplantingssnelheid", 
+        "golfperiode", 
+        "b",
+      ),
       q(
         207,
         "De frequentie van een radar bedraagt 9.410 MHz. Hoeveel bedraagt de golflengte?",
@@ -1625,8 +1733,22 @@ export const questionSets: QuestionSet[] = [
         "X band",
         "c",
       ),
-      q(211, "Een seconde is gelijk aan:", "100.000 μs", "1.000.000 μs", "1.000 μs", "b"),
-      q(212, "Een Mega Hertz (MHz) is gelijk aan:", "1.000.000 Hz", "100.000 Hz", "1.000 Hz", "a"),
+      q(
+        211, 
+        "Een seconde is gelijk aan:", 
+        "100.000 μs", 
+        "1.000.000 μs", 
+        "1.000 μs", 
+        "b",
+      ),
+      q(
+        212, 
+        "Een Mega Hertz (MHz) is gelijk aan:", 
+        "1.000.000 Hz", 
+        "100.000 Hz", 
+        "1.000 Hz", 
+        "a",
+      ),
       q(
         213,
         "De hoofdtrillingskring:",
@@ -1923,7 +2045,14 @@ export const questionSets: QuestionSet[] = [
         "6 mijl",
         "b",
       ),
-      q(250, "Hoeveel bedraagt de golflengte bij een frequentie van 10 GHz?", "3 cm", "1 cm", "10 cm", "a"),
+      q(
+        250, 
+        "Hoeveel bedraagt de golflengte bij een frequentie van 10 GHz?", 
+        "3 cm", 
+        "1 cm", 
+        "10 cm", 
+        "a",
+      ),
     ],
   },
 ]
