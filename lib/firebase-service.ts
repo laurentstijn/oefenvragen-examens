@@ -33,6 +33,15 @@ export interface QuizProgress {
   timestamp: number
 }
 
+async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(password)
+  const hash = await crypto.subtle.digest("SHA-256", data)
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+}
+
 export async function checkUsernameExists(username: string): Promise<boolean> {
   try {
     const usersRef = ref(db, "users")
@@ -44,18 +53,39 @@ export async function checkUsernameExists(username: string): Promise<boolean> {
   }
 }
 
-export async function createUser(username: string): Promise<void> {
+export async function createUser(username: string, password: string): Promise<void> {
   try {
+    const hashedPassword = await hashPassword(password)
     const userRef = ref(db, `users/${username}`)
     await set(userRef, {
       username,
+      password: hashedPassword,
       createdAt: Date.now(),
-      incorrectQuestions: {}, // Initialize incorrectQuestions node
+      incorrectQuestions: {},
     })
     console.log("[v0] User created:", username)
   } catch (error) {
     console.error("[v0] Error creating user:", error)
     throw error
+  }
+}
+
+export async function verifyPassword(username: string, password: string): Promise<boolean> {
+  try {
+    const userRef = ref(db, `users/${username}`)
+    const snapshot = await get(userRef)
+
+    if (!snapshot.exists()) {
+      return false
+    }
+
+    const userData = snapshot.val()
+    const hashedPassword = await hashPassword(password)
+
+    return userData.password === hashedPassword
+  } catch (error) {
+    console.error("[v0] Error verifying password:", error)
+    return false
   }
 }
 
@@ -315,5 +345,34 @@ export async function getIncorrectQuestions(username: string): Promise<number[]>
   } catch (error) {
     console.error("[v0] Error getting incorrect questions:", error)
     return []
+  }
+}
+
+export async function userHasPassword(username: string): Promise<boolean> {
+  try {
+    const userRef = ref(db, `users/${username}`)
+    const snapshot = await get(userRef)
+
+    if (!snapshot.exists()) {
+      return false
+    }
+
+    const userData = snapshot.val()
+    return !!userData.password
+  } catch (error) {
+    console.error("[v0] Error checking if user has password:", error)
+    return false
+  }
+}
+
+export async function setPasswordForUser(username: string, password: string): Promise<void> {
+  try {
+    const hashedPassword = await hashPassword(password)
+    const userRef = ref(db, `users/${username}/password`)
+    await set(userRef, hashedPassword)
+    console.log("[v0] Password set for existing user:", username)
+  } catch (error) {
+    console.error("[v0] Error setting password for user:", error)
+    throw error
   }
 }

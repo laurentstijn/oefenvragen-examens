@@ -1,13 +1,13 @@
 "use client"
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
-import { checkUsernameExists, createUser } from "@/lib/firebase-service"
+import { checkUsernameExists, createUser, verifyPassword, userHasPassword } from "@/lib/firebase-service"
 
 interface AuthContextType {
   username: string | null
   loading: boolean
   isAnonymous: boolean
-  signIn: (username: string) => Promise<void>
+  signIn: (username: string, password: string, isNewUser: boolean) => Promise<void>
   signInAnonymously: () => void
   signOut: () => void
 }
@@ -40,15 +40,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false)
   }, [])
 
-  const signIn = async (username: string) => {
+  const signIn = async (username: string, password: string, isNewUser: boolean) => {
     try {
       const exists = await checkUsernameExists(username)
 
-      if (exists) {
-        throw new Error("Deze gebruikersnaam is al in gebruik. Kies een andere naam.")
-      }
+      if (isNewUser) {
+        if (exists) {
+          throw new Error("Deze gebruikersnaam is al in gebruik. Kies een andere naam.")
+        }
+        await createUser(username, password)
+      } else {
+        if (!exists) {
+          throw new Error("Gebruikersnaam niet gevonden.")
+        }
 
-      await createUser(username)
+        const hasPassword = await userHasPassword(username)
+        if (!hasPassword) {
+          throw new Error("LEGACY_USER_NO_PASSWORD")
+        }
+
+        const isValid = await verifyPassword(username, password)
+        if (!isValid) {
+          throw new Error("Verkeerd wachtwoord.")
+        }
+      }
 
       localStorage.setItem("quiz_username", username)
       localStorage.removeItem("quiz_anonymous")
