@@ -45,22 +45,22 @@ export default function Page() {
         </div>
       </div>
 
-      <div className="w-full px-2 sm:px-4 py-3 sm:py-4 relative z-10">
-        <div className="text-center mb-3 sm:mb-4">
+      <div className="w-full px-2 sm:px-4 py-2 sm:py-3 relative z-10">
+        <div className="text-center mb-2 sm:mb-3">
           <h1 className="text-base sm:text-lg md:text-xl font-bold text-foreground">Oefenvragen Examen Radar</h1>
         </div>
 
         {loading ? (
-          <div className="text-center py-12">
-            <p className="text-muted-foreground">Laden...</p>
+          <div className="text-center py-8 sm:py-12">
+            <p className="text-muted-foreground text-sm sm:text-base">Laden...</p>
           </div>
         ) : !username ? (
           <AuthForm />
         ) : (
           <>
             {isAnonymous && (
-              <div className="mb-4">
-                <Button onClick={signOut} variant="outline" className="bg-transparent">
+              <div className="mb-2 sm:mb-4">
+                <Button onClick={signOut} variant="outline" className="bg-transparent text-sm">
                   <ChevronLeft className="w-4 h-4 mr-2" />
                   Terug naar login
                 </Button>
