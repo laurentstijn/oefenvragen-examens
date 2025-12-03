@@ -99,6 +99,7 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
   const [seriesProgress, setSeriesProgress] = useState<Record<string, QuizProgress>>({})
   const [showResumeDialog, setShowResumeDialog] = useState(false)
   const [resumeSetId, setResumeSetId] = useState<string | null>(null)
+  const [savedProgress, setSavedProgress] = useState<QuizProgress | null>(null)
 
   const handleCancelResume = () => {
     setShowResumeDialog(false)
@@ -206,6 +207,7 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
         setResumeSetId(set.id)
         setShowResumeDialog(true)
         setSelectedSet(set)
+        setSavedProgress(progress)
       } else {
         setSelectedSet(set)
       }
@@ -336,17 +338,12 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
     setIsWrongAnswersMode(false)
   }
 
-  if (showResumeDialog && resumeSetId) {
-    const progress = seriesProgress[resumeSetId]
-    if (!progress) {
-      setShowResumeDialog(false)
-      return null
-    }
-
+  if (showResumeDialog && savedProgress) {
+    const progress = savedProgress
     return (
-      <Card className="border-2">
+      <Card className="border-2 max-w-2xl mx-auto mt-8">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl mb-2">Doorgaan met oefenen?</CardTitle>
+          <CardTitle className="text-2xl mb-2">Doorgaan waar je was gebleven?</CardTitle>
           <CardDescription className="text-base">Je hebt een onvoltooide quiz voor {progress.setName}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -355,7 +352,7 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
               <span className="font-medium">Reeks:</span> {progress.setName}
             </p>
             <p className="text-sm">
-              <span className="font-medium">Voortgang:</span> {progress.answers.length} van{" "}
+              <span className="font-medium">Voortgang:</span> {progress.answers?.length || 0} van{" "}
               {selectedSet?.questions.length || 0} vragen beantwoord
             </p>
             <p className="text-sm text-muted-foreground">
@@ -418,7 +415,7 @@ export default function Quiz({ onQuizComplete }: QuizProps) {
                     <h3 className="font-semibold text-lg">{set.name}</h3>
                     <div className="flex items-center gap-3 mt-1">
                       {attemptCount > 0 && <p className="text-sm text-muted-foreground">{attemptCount}x geprobeerd</p>}
-                      {progressInfo && (
+                      {progressInfo && progressInfo.answers && (
                         <p className="text-sm font-medium text-orange-500">
                           {progressInfo.answers.length}/{set.questions.length} beantwoord
                         </p>
