@@ -61,6 +61,7 @@ function convertQuestions(questions: Question[]): QuizQuestion[] {
       ],
       correctAnswer: q.correct,
       correctAnswerText: q.options[q.correct],
+      optionImages: q.optionImages, // Explicitly pass through optionImages
     }))
 }
 
