@@ -161,7 +161,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
       return
     }
     try {
-      await saveQuizProgress({
+      const progressData = {
         username,
         setId: selectedSet.id,
         setName: selectedSet.name,
@@ -170,7 +170,15 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
         shuffleQuestions: isShuffleQuestions,
         shuffleAnswers: isShuffleAnswers,
         timestamp: Date.now(),
-      })
+      }
+
+      await saveQuizProgress(progressData)
+
+      // Update local seriesProgress state immediately
+      setSeriesProgress((prev) => ({
+        ...prev,
+        [selectedSet.id]: progressData,
+      }))
     } catch (error) {
       console.error("[v0] Error saving progress:", error)
     }
@@ -387,8 +395,8 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
   const saveQuizResultToFirebase = async (finalAnswers: (string | null)[]) => {
     if (!username || !selectedSet || isAnonymous) return
     if (isWrongAnswersMode) {
-      onQuizComplete?.()
       await loadWrongAnswers()
+      onQuizComplete?.()
       return
     }
 

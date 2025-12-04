@@ -16,6 +16,7 @@ export default function Page() {
   const showAdminButton = false
 
   const handleQuizComplete = () => {
+    console.log("[v0] Quiz completed, refreshing stats")
     setStatsRefreshTrigger((prev) => prev + 1)
   }
 

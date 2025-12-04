@@ -27,8 +27,10 @@ export function UserStatsPanel({ refreshTrigger, onDataReset }: UserStatsPanelPr
   const loadStats = async () => {
     if (!username) return
 
+    console.log("[v0] Loading user stats for:", username)
     try {
       const userStats = await getUserStats(username)
+      console.log("[v0] User stats loaded:", userStats)
       setStats(userStats)
     } catch (error) {
       console.error("[v0] Error loading stats:", error)
