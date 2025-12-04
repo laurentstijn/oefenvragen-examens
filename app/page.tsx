@@ -88,6 +88,10 @@ export default function Page() {
           </>
         )}
       </div>
+
+      <div className="fixed bottom-4 right-4 z-50">
+        <p className="text-xs text-muted-foreground/60">@laurentStijn</p>
+      </div>
     </main>
   )
 }
