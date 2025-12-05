@@ -310,7 +310,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
     setSelectedAnswer(answer)
   }
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (!selectedAnswer) {
       alert("Selecteer eerst een antwoord")
       return
@@ -326,29 +326,22 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
     newAnswers[currentQuestion] = selectedAnswer
     setAnswers(newAnswers)
 
-    if (username && !isAnonymous) {
-      const isCorrect = selectedAnswer === questions[currentQuestion].correctAnswer
-      const questionId = questions[currentQuestion].id
+    const currentQ = questions[currentQuestion]
+    const isCorrect = selectedAnswer === currentQ.correctAnswer
 
-      console.log("[v0] Question answered:", { questionId, isCorrect, isWrongAnswersMode })
+    console.log("[v0] Question answered:", { currentQ, isCorrect, isWrongAnswersMode })
 
-      if (isWrongAnswersMode) {
-        // In wrong answers mode: remove if correct
-        if (isCorrect) {
-          console.log("[v0] Removing correct answer from incorrect questions:", questionId)
-          removeIncorrectQuestion(username, questionId).catch(console.error)
-        }
-      } else {
-        // In normal mode: add if incorrect
-        if (!isCorrect) {
-          console.log("[v0] Adding incorrect question:", questionId)
-          addIncorrectQuestion(username, questionId).catch(console.error)
-        } else {
-          // If answered correctly in normal mode, also remove from incorrect list
-          console.log("[v0] Removing correct answer from incorrect questions:", questionId)
-          removeIncorrectQuestion(username, questionId).catch(console.error)
-        }
+    try {
+      if (isCorrect) {
+        console.log("[v0] Removing correct answer from incorrect questions:", currentQ.id)
+        await removeIncorrectQuestion(username, currentQ.id)
+        await loadWrongAnswers()
+      } else if (!isWrongAnswersMode) {
+        await addIncorrectQuestion(username, currentQ.id)
+        await loadWrongAnswers()
       }
+    } catch (error) {
+      console.error("[v0] Error updating incorrect questions:", error)
     }
 
     if (currentQuestion < questions.length - 1) {
