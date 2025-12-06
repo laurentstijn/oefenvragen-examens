@@ -13,7 +13,7 @@ export default function Page() {
   const [statsRefreshTrigger, setStatsRefreshTrigger] = useState(0)
   const [quizKey, setQuizKey] = useState(0)
   const [isQuizActive, setIsQuizActive] = useState(false) // Added state to track if quiz is active
-  const showAdminButton = true
+  const showAdminButton = false
 
   const handleQuizComplete = () => {
     console.log("[v0] Quiz completed, refreshing stats")
