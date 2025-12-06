@@ -1,5 +1,5 @@
 import { db } from "./firebase-config"
-import { ref, push, set, get, query, orderByChild, equalTo, child, remove } from "firebase/database"
+import { ref, set, get, child, remove } from "firebase/database"
 
 export interface QuizResult {
   username: string
@@ -45,6 +45,14 @@ export interface QuestionEdit {
   timestamp: number
 }
 
+export interface MigrationReport {
+  usersFound: string[]
+  progressMigrated: Record<string, number>
+  resultsMigrated: Record<string, number>
+  incorrectQuestionsMigrated: Record<string, number>
+  errors: string[]
+}
+
 async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder()
   const data = encoder.encode(password)
@@ -75,6 +83,8 @@ export async function createUser(username: string, password: string): Promise<vo
       createdAt: Date.now(),
       lastActive: Date.now(), // Track last activity
       incorrectQuestions: {},
+      quizProgress: {}, // New field for quiz progress
+      quizResults: {}, // New field for quiz results
     })
     console.log("[v0] User created:", username)
   } catch (error) {
@@ -104,16 +114,14 @@ export async function verifyPassword(username: string, password: string): Promis
 
 export async function saveQuizResult(result: QuizResult) {
   try {
-    const quizResultsRef = ref(db, "quizResults")
-    const newResultRef = push(quizResultsRef)
-
-    await set(newResultRef, {
+    const userRef = ref(db, `users/${result.username}/quizResults/${result.setId}`)
+    await set(userRef, {
       ...result,
       timestamp: Date.now(),
     })
 
-    console.log("[v0] Quiz result saved with ID:", newResultRef.key)
-    return newResultRef.key
+    console.log("[v0] Quiz result saved for user:", result.username)
+    return result.setId
   } catch (error) {
     console.error("[v0] Error saving quiz result:", error)
     throw error
@@ -122,10 +130,8 @@ export async function saveQuizResult(result: QuizResult) {
 
 export async function getUserStats(username: string): Promise<UserStats> {
   try {
-    const quizResultsRef = ref(db, "quizResults")
-    const userQuery = query(quizResultsRef, orderByChild("username"), equalTo(username))
-
-    const snapshot = await get(userQuery)
+    const userRef = ref(db, `users/${username}/quizResults`)
+    const snapshot = await get(userRef)
 
     if (!snapshot.exists()) {
       return {
@@ -162,10 +168,8 @@ export async function getUserStats(username: string): Promise<UserStats> {
 
 export async function getSetResults(username: string, setId: string) {
   try {
-    const quizResultsRef = ref(db, "quizResults")
-    const setQuery = query(quizResultsRef, orderByChild("username"), equalTo(username))
-
-    const snapshot = await get(setQuery)
+    const userRef = ref(db, `users/${username}/quizResults/${setId}`)
+    const snapshot = await get(userRef)
 
     if (!snapshot.exists()) {
       return []
@@ -173,10 +177,7 @@ export async function getSetResults(username: string, setId: string) {
 
     const results: QuizResult[] = []
     snapshot.forEach((childSnapshot) => {
-      const data = childSnapshot.val()
-      if (data.setId === setId) {
-        results.push(data as QuizResult)
-      }
+      results.push(childSnapshot.val() as QuizResult)
     })
 
     results.sort((a, b) => b.timestamp - a.timestamp)
@@ -189,27 +190,14 @@ export async function getSetResults(username: string, setId: string) {
 
 export async function resetUserStats(username: string): Promise<void> {
   try {
-    const quizResultsRef = ref(db, "quizResults")
-    const userQuery = query(quizResultsRef, orderByChild("username"), equalTo(username))
+    const progressRef = ref(db, `users/${username}/quizProgress`)
+    const resultsRef = ref(db, `users/${username}/quizResults`)
+    const incorrectRef = ref(db, `users/${username}/incorrectQuestions`)
 
-    const snapshot = await get(userQuery)
+    await remove(progressRef)
+    await remove(resultsRef)
+    await remove(incorrectRef)
 
-    const deletePromises: Promise<void>[] = []
-
-    if (snapshot.exists()) {
-      snapshot.forEach((childSnapshot) => {
-        const resultRef = ref(db, `quizResults/${childSnapshot.key}`)
-        deletePromises.push(remove(resultRef))
-      })
-    }
-
-    const progressRef = ref(db, `quizProgress/${username}`)
-    deletePromises.push(remove(progressRef))
-
-    const userRef = ref(db, `users/${username}/incorrectQuestions`)
-    deletePromises.push(remove(userRef))
-
-    await Promise.all(deletePromises)
     console.log("[v0] User stats and progress reset for:", username)
   } catch (error) {
     console.error("[v0] Error resetting user stats:", error)
@@ -219,10 +207,8 @@ export async function resetUserStats(username: string): Promise<void> {
 
 export async function getSeriesAttempts(username: string): Promise<Record<string, number>> {
   try {
-    const quizResultsRef = ref(db, "quizResults")
-    const userQuery = query(quizResultsRef, orderByChild("username"), equalTo(username))
-
-    const snapshot = await get(userQuery)
+    const userRef = ref(db, `users/${username}/quizResults`)
+    const snapshot = await get(userRef)
 
     if (!snapshot.exists()) {
       return {}
@@ -244,14 +230,14 @@ export async function getSeriesAttempts(username: string): Promise<Record<string
 
 export async function saveQuizProgress(progress: QuizProgress): Promise<void> {
   try {
-    const progressRef = ref(db, `quizProgress/${progress.username}/${progress.setId}`)
+    const progressRef = ref(db, `users/${progress.username}/quizProgress/${progress.setId}`)
     const cleanedProgress = {
       ...progress,
       answers: (progress.answers || []).map((answer) => (answer === null || answer === undefined ? "" : answer)),
       timestamp: Date.now(),
     }
     await set(progressRef, cleanedProgress)
-    console.log("[v0] Quiz progress saved")
+    console.log("[v0] Quiz progress saved for user:", progress.username)
   } catch (error) {
     console.error("[v0] Error saving quiz progress:", error)
     throw error
@@ -260,7 +246,7 @@ export async function saveQuizProgress(progress: QuizProgress): Promise<void> {
 
 export async function getQuizProgress(username: string, setId: string): Promise<QuizProgress | null> {
   try {
-    const progressRef = ref(db, `quizProgress/${username}/${setId}`)
+    const progressRef = ref(db, `users/${username}/quizProgress/${setId}`)
     const snapshot = await get(progressRef)
 
     if (!snapshot.exists()) {
@@ -276,7 +262,7 @@ export async function getQuizProgress(username: string, setId: string): Promise<
 
 export async function getAllQuizProgress(username: string): Promise<Record<string, QuizProgress>> {
   try {
-    const progressRef = ref(db, `quizProgress/${username}`)
+    const progressRef = ref(db, `users/${username}/quizProgress`)
     const snapshot = await get(progressRef)
 
     if (!snapshot.exists()) {
@@ -292,9 +278,9 @@ export async function getAllQuizProgress(username: string): Promise<Record<strin
 
 export async function clearQuizProgress(username: string, setId: string): Promise<void> {
   try {
-    const progressRef = ref(db, `quizProgress/${username}/${setId}`)
+    const progressRef = ref(db, `users/${username}/quizProgress/${setId}`)
     await remove(progressRef)
-    console.log("[v0] Quiz progress cleared")
+    console.log("[v0] Quiz progress cleared for user:", username)
   } catch (error) {
     console.error("[v0] Error clearing quiz progress:", error)
   }
@@ -442,5 +428,203 @@ export async function updateLastActive(username: string): Promise<void> {
     await set(lastActiveRef, Date.now())
   } catch (error) {
     console.error("[v0] Error updating last active:", error)
+  }
+}
+
+export async function checkOldDataExists(): Promise<{
+  hasOldProgress: boolean
+  hasOldResults: boolean
+  hasOldIncorrect: boolean
+}> {
+  try {
+    const progressRef = ref(db, "quizProgress")
+    const resultsRef = ref(db, "quizResults")
+    const incorrectRef = ref(db, "incorrectQuestions")
+
+    const [progressSnapshot, resultsSnapshot, incorrectSnapshot] = await Promise.all([
+      get(progressRef).catch(() => null),
+      get(resultsRef).catch(() => null),
+      get(incorrectRef).catch(() => null),
+    ])
+
+    return {
+      hasOldProgress: progressSnapshot?.exists() ?? false,
+      hasOldResults: resultsSnapshot?.exists() ?? false,
+      hasOldIncorrect: incorrectSnapshot?.exists() ?? false,
+    }
+  } catch (error) {
+    console.error("[v0] Error checking old data:", error)
+    return { hasOldProgress: false, hasOldResults: false, hasOldIncorrect: false }
+  }
+}
+
+export async function inspectOldData(): Promise<{
+  oldProgress: Record<string, any>
+  oldResults: Record<string, any>
+  oldIncorrect: Record<string, any>
+}> {
+  try {
+    const progressRef = ref(db, "quizProgress")
+    const resultsRef = ref(db, "quizResults")
+    const incorrectRef = ref(db, "incorrectQuestions")
+
+    const [progressSnapshot, resultsSnapshot, incorrectSnapshot] = await Promise.all([
+      get(progressRef).catch(() => null),
+      get(resultsRef).catch(() => null),
+      get(incorrectRef).catch(() => null),
+    ])
+
+    return {
+      oldProgress: progressSnapshot?.exists() ? progressSnapshot.val() : {},
+      oldResults: resultsSnapshot?.exists() ? resultsSnapshot.val() : {},
+      oldIncorrect: incorrectSnapshot?.exists() ? incorrectSnapshot.val() : {},
+    }
+  } catch (error) {
+    console.error("[v0] Error inspecting old data:", error)
+    return { oldProgress: {}, oldResults: {}, oldIncorrect: {} }
+  }
+}
+
+export async function deleteOldDataNodes(): Promise<void> {
+  try {
+    const progressRef = ref(db, "quizProgress")
+    const resultsRef = ref(db, "quizResults")
+    const incorrectRef = ref(db, "incorrectQuestions")
+
+    await Promise.all([remove(progressRef), remove(resultsRef), remove(incorrectRef)])
+
+    console.log("[v0] Old data nodes deleted successfully")
+  } catch (error) {
+    console.error("[v0] Error deleting old data nodes:", error)
+    throw error
+  }
+}
+
+export async function migrateOldDataToNewStructure(): Promise<MigrationReport> {
+  const report: MigrationReport = {
+    usersFound: [],
+    progressMigrated: {},
+    resultsMigrated: {},
+    incorrectQuestionsMigrated: {},
+    errors: [],
+  }
+
+  try {
+    console.log("[v0] Starting migration...")
+
+    // Get all existing users first
+    const usersRef = ref(db, "users")
+    const usersSnapshot = await get(usersRef)
+    const existingUsers: string[] = []
+
+    if (usersSnapshot.exists()) {
+      usersSnapshot.forEach((child) => {
+        existingUsers.push(child.key as string)
+      })
+    }
+
+    console.log("[v0] Existing users found:", existingUsers)
+
+    // Get old data
+    const oldData = await inspectOldData()
+    console.log("[v0] Old data found:", {
+      progress: Object.keys(oldData.oldProgress),
+      results: Object.keys(oldData.oldResults),
+      incorrect: Object.keys(oldData.oldIncorrect),
+    })
+
+    // Migrate quizProgress
+    if (Object.keys(oldData.oldProgress).length > 0) {
+      for (const [username, progressData] of Object.entries(oldData.oldProgress)) {
+        if (!existingUsers.includes(username)) {
+          report.errors.push(`User ${username} not found in users/ node, skipping progress migration`)
+          continue
+        }
+
+        try {
+          report.usersFound.push(username)
+          let count = 0
+
+          for (const [setId, progress] of Object.entries(progressData as Record<string, any>)) {
+            const newProgressRef = ref(db, `users/${username}/quizProgress/${setId}`)
+            await set(newProgressRef, progress)
+            console.log(`[v0] Migrated progress for ${username}/${setId}`)
+            count++
+          }
+
+          report.progressMigrated[username] = count
+        } catch (error) {
+          report.errors.push(`Error migrating progress for ${username}: ${error}`)
+        }
+      }
+    }
+
+    // Migrate quizResults
+    if (Object.keys(oldData.oldResults).length > 0) {
+      for (const [resultId, resultData] of Object.entries(oldData.oldResults)) {
+        try {
+          const result = resultData as any
+          const username = result.username
+
+          if (!username) {
+            report.errors.push(`Result ${resultId} has no username field, skipping`)
+            continue
+          }
+
+          if (!existingUsers.includes(username)) {
+            report.errors.push(`User ${username} not found in users/ node, skipping result ${resultId}`)
+            continue
+          }
+
+          if (!report.usersFound.includes(username)) {
+            report.usersFound.push(username)
+          }
+
+          // Copy result to users/[username]/quizResults/[resultId]
+          const newResultRef = ref(db, `users/${username}/quizResults/${resultId}`)
+          await set(newResultRef, result)
+          console.log(`[v0] Migrated result ${resultId} for ${username}`)
+
+          report.resultsMigrated[username] = (report.resultsMigrated[username] || 0) + 1
+        } catch (error) {
+          report.errors.push(`Error migrating result ${resultId}: ${error}`)
+        }
+      }
+    }
+
+    // Migrate incorrectQuestions
+    if (Object.keys(oldData.oldIncorrect).length > 0) {
+      for (const [username, incorrectData] of Object.entries(oldData.oldIncorrect)) {
+        if (!existingUsers.includes(username)) {
+          report.errors.push(`User ${username} not found in users/ node, skipping incorrect questions migration`)
+          continue
+        }
+
+        try {
+          if (!report.usersFound.includes(username)) {
+            report.usersFound.push(username)
+          }
+          let count = 0
+
+          for (const [questionId, data] of Object.entries(incorrectData as Record<string, any>)) {
+            const newIncorrectRef = ref(db, `users/${username}/incorrectQuestions/${questionId}`)
+            await set(newIncorrectRef, data)
+            console.log(`[v0] Migrated incorrect question for ${username}/${questionId}`)
+            count++
+          }
+
+          report.incorrectQuestionsMigrated[username] = count
+        } catch (error) {
+          report.errors.push(`Error migrating incorrect questions for ${username}: ${error}`)
+        }
+      }
+    }
+
+    console.log("[v0] Migration completed:", report)
+    return report
+  } catch (error) {
+    console.error("[v0] Error during migration:", error)
+    report.errors.push(`Fatal error: ${error}`)
+    return report
   }
 }

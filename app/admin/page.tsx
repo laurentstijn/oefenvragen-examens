@@ -6,11 +6,18 @@ import { questionSets, type Question } from "@/lib/questions-data"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ChevronLeft, Search, Download } from "lucide-react"
+import { ChevronLeft, Search, Download, Database } from "lucide-react"
 import Link from "next/link"
 import { QuestionEditor } from "@/components/question-editor"
 import { useAuth } from "@/contexts/auth-context"
 import { useRouter } from "next/navigation"
+import {
+  checkOldDataExists,
+  inspectOldData,
+  deleteOldDataNodes,
+  migrateOldDataToNewStructure,
+  type MigrationReport,
+} from "@/lib/firebase-service"
 
 export default function AdminPage() {
   const { username, loading } = useAuth()
@@ -23,6 +30,20 @@ export default function AdminPage() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editedQuestions, setEditedQuestions] = useState<Map<number, Question>>(new Map())
   const [showExportModal, setShowExportModal] = useState(false)
+  const [showMigrationModal, setShowMigrationModal] = useState(false)
+  const [migrationStatus, setMigrationStatus] = useState<{
+    hasOldProgress: boolean
+    hasOldResults: boolean
+    hasOldIncorrect: boolean
+  } | null>(null)
+  const [oldDataDetails, setOldDataDetails] = useState<{
+    oldProgress: Record<string, any>
+    oldResults: Record<string, any>
+    oldIncorrect: Record<string, any>
+  } | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isMigrating, setIsMigrating] = useState(false)
+  const [migrationReport, setMigrationReport] = useState<MigrationReport | null>(null)
 
   useEffect(() => {
     if (!loading) {
@@ -107,6 +128,76 @@ export default function AdminPage() {
     return sortedEdits.map(generateQuestionCode).join("\n")
   }, [editedQuestions])
 
+  const handleCheckMigrationStatus = async () => {
+    try {
+      setShowMigrationModal(true)
+      const [status, details] = await Promise.all([checkOldDataExists(), inspectOldData()])
+      setMigrationStatus(status)
+      setOldDataDetails(details)
+    } catch (error) {
+      alert("Error checking migration status: " + error)
+      setShowMigrationModal(false)
+    }
+  }
+
+  const handleDeleteOldData = async () => {
+    const confirmed = confirm(
+      "WAARSCHUWING: Dit verwijdert de oude top-level nodes (quizProgress, quizResults, incorrectQuestions) uit je database. " +
+        "Zorg dat je een backup hebt gemaakt! Weet je het zeker?",
+    )
+
+    if (!confirmed) return
+
+    try {
+      setIsDeleting(true)
+      await deleteOldDataNodes()
+      alert("Oude data nodes succesvol verwijderd!")
+      setShowMigrationModal(false)
+      setMigrationStatus(null)
+      setOldDataDetails(null)
+    } catch (error) {
+      alert("Error bij verwijderen: " + error)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  const handleMigrateData = async () => {
+    const confirmed = confirm(
+      "Dit kopieert alle data van de oude nodes naar de nieuwe structuur onder users/[username]/. " +
+        "De oude nodes blijven staan als backup. Doorgaan?",
+    )
+
+    if (!confirmed) return
+
+    try {
+      setIsMigrating(true)
+      const report = await migrateOldDataToNewStructure()
+      setMigrationReport(report)
+
+      if (report.errors.length === 0) {
+        alert(
+          `Migratie succesvol!\n\n` +
+            `Gebruikers: ${report.usersFound.length}\n` +
+            `Progress items: ${Object.values(report.progressMigrated).reduce((a, b) => a + b, 0)}\n` +
+            `Results items: ${Object.values(report.resultsMigrated).reduce((a, b) => a + b, 0)}\n` +
+            `Foute vragen: ${Object.values(report.incorrectQuestionsMigrated).reduce((a, b) => a + b, 0)}`,
+        )
+        // Refresh status
+        const [status, details] = await Promise.all([checkOldDataExists(), inspectOldData()])
+        setMigrationStatus(status)
+        setOldDataDetails(details)
+      } else {
+        alert(`Migratie voltooid met ${report.errors.length} error(s). Check de console voor details.`)
+        console.error("[v0] Migration errors:", report.errors)
+      }
+    } catch (error) {
+      alert("Error tijdens migratie: " + error)
+    } finally {
+      setIsMigrating(false)
+    }
+  }
+
   if (loading) {
     return (
       <main className="w-full min-h-screen bg-background flex items-center justify-center">
@@ -168,6 +259,10 @@ export default function AdminPage() {
             )}
           </div>
           <div className="flex gap-2">
+            <Button onClick={handleCheckMigrationStatus} variant="outline">
+              <Database className="w-4 h-4 mr-2" />
+              Check Database Status
+            </Button>
             <Button onClick={exportCode} variant="default" disabled={editedQuestions.size === 0}>
               <Download className="w-4 h-4 mr-2" />
               Exporteer Code
@@ -309,6 +404,146 @@ export default function AdminPage() {
             </CardContent>
             <div className="border-t p-4">
               <Button onClick={() => setShowExportModal(false)} className="w-full">
+                Sluiten
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {showMigrationModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <CardHeader>
+              <CardTitle>Database Status</CardTitle>
+            </CardHeader>
+            <CardContent className="flex-1 overflow-y-auto space-y-4">
+              {migrationStatus && (
+                <>
+                  {!migrationStatus.hasOldProgress &&
+                  !migrationStatus.hasOldResults &&
+                  !migrationStatus.hasOldIncorrect ? (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <h3 className="font-semibold text-green-900 mb-2">Database is schoon!</h3>
+                      <p className="text-sm text-green-800 mb-3">
+                        Er zijn geen oude top-level nodes meer. Alle data staat in de nieuwe structuur onder
+                        users/[username]/.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                      <h3 className="font-semibold text-yellow-900 mb-2">Oude data gevonden</h3>
+                      <p className="text-sm text-yellow-800 mb-3">
+                        Er zijn nog oude top-level nodes in je database die gemigreerd moeten worden:
+                      </p>
+                      <ul className="list-disc list-inside space-y-1 text-sm text-yellow-800 ml-2">
+                        {migrationStatus.hasOldProgress && <li>quizProgress/ (oude progress data)</li>}
+                        {migrationStatus.hasOldResults && <li>quizResults/ (oude results data)</li>}
+                        {migrationStatus.hasOldIncorrect && <li>incorrectQuestions/ (oude foute vragen)</li>}
+                      </ul>
+                    </div>
+                  )}
+
+                  {oldDataDetails && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <h3 className="font-semibold text-blue-900 mb-2">Details van oude data:</h3>
+                      <div className="text-sm text-blue-800 space-y-2">
+                        {Object.keys(oldDataDetails.oldProgress).length > 0 && (
+                          <div>
+                            <strong>quizProgress:</strong> {Object.keys(oldDataDetails.oldProgress).length} gebruiker(s)
+                            met progress
+                          </div>
+                        )}
+                        {Object.keys(oldDataDetails.oldResults).length > 0 && (
+                          <div>
+                            <strong>quizResults:</strong> {Object.keys(oldDataDetails.oldResults).length} gebruiker(s)
+                            met results
+                          </div>
+                        )}
+                        {Object.keys(oldDataDetails.oldIncorrect).length > 0 && (
+                          <div>
+                            <strong>incorrectQuestions:</strong> {Object.keys(oldDataDetails.oldIncorrect).length}{" "}
+                            gebruiker(s) met foute vragen
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {(migrationStatus.hasOldProgress ||
+                    migrationStatus.hasOldResults ||
+                    migrationStatus.hasOldIncorrect) && (
+                    <>
+                      <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                        <h3 className="font-semibold text-orange-900 mb-2">Stap 1: Migreer Data</h3>
+                        <p className="text-sm text-orange-800 mb-3">
+                          Kopieer eerst alle oude data naar de nieuwe structuur onder users/[username]/. De oude nodes
+                          blijven staan als backup.
+                        </p>
+                        <Button onClick={handleMigrateData} disabled={isMigrating} className="w-full">
+                          {isMigrating ? "Bezig met migreren..." : "Migreer oude data naar nieuwe structuur"}
+                        </Button>
+                      </div>
+
+                      {migrationReport && (
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                          <h3 className="font-semibold text-green-900 mb-2">Migratie Rapport</h3>
+                          <div className="text-sm text-green-800 space-y-2">
+                            <div>
+                              <strong>Gebruikers gemigreerd:</strong> {migrationReport.usersFound.join(", ")}
+                            </div>
+                            <div>
+                              <strong>Progress items:</strong>{" "}
+                              {Object.values(migrationReport.progressMigrated).reduce((a, b) => a + b, 0)}
+                            </div>
+                            <div>
+                              <strong>Results items:</strong>{" "}
+                              {Object.values(migrationReport.resultsMigrated).reduce((a, b) => a + b, 0)}
+                            </div>
+                            <div>
+                              <strong>Foute vragen:</strong>{" "}
+                              {Object.values(migrationReport.incorrectQuestionsMigrated).reduce((a, b) => a + b, 0)}
+                            </div>
+                            {migrationReport.errors.length > 0 && (
+                              <div className="text-red-600">
+                                <strong>Errors:</strong> {migrationReport.errors.length}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                        <h3 className="font-semibold text-red-900 mb-2">Stap 2: Verwijder Oude Nodes</h3>
+                        <p className="text-sm text-red-800 mb-3">
+                          Na succesvolle migratie kun je de oude top-level nodes verwijderen. Controleer eerst in
+                          Firebase Console of alle data correct is gekopieerd!
+                        </p>
+                        <Button
+                          onClick={handleDeleteOldData}
+                          variant="destructive"
+                          disabled={isDeleting}
+                          className="w-full"
+                        >
+                          {isDeleting ? "Bezig met verwijderen..." : "Verwijder oude data nodes"}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </CardContent>
+            <div className="border-t p-4 flex gap-2">
+              <Button
+                onClick={() => {
+                  setShowMigrationModal(false)
+                  setMigrationStatus(null)
+                  setOldDataDetails(null)
+                  setMigrationReport(null)
+                }}
+                className="w-full"
+                variant="outline"
+              >
                 Sluiten
               </Button>
             </div>
