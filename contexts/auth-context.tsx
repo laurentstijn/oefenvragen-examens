@@ -1,7 +1,13 @@
 "use client"
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
-import { checkUsernameExists, createUser, verifyPassword, userHasPassword } from "@/lib/firebase-service"
+import {
+  checkUsernameExists,
+  createUser,
+  verifyPassword,
+  userHasPassword,
+  updateLastActive,
+} from "@/lib/firebase-service"
 
 interface AuthContextType {
   username: string | null
@@ -64,6 +70,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           throw new Error("Verkeerd wachtwoord.")
         }
       }
+
+      await updateLastActive(username)
 
       localStorage.setItem("quiz_username", username)
       localStorage.removeItem("quiz_anonymous")

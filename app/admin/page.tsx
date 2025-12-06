@@ -167,10 +167,12 @@ export default function AdminPage() {
               </span>
             )}
           </div>
-          <Button onClick={exportCode} variant="default" disabled={editedQuestions.size === 0}>
-            <Download className="w-4 h-4 mr-2" />
-            Exporteer Code
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={exportCode} variant="default" disabled={editedQuestions.size === 0}>
+              <Download className="w-4 h-4 mr-2" />
+              Exporteer Code
+            </Button>
+          </div>
         </div>
 
         <Card className="mb-6">

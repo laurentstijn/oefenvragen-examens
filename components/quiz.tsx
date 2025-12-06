@@ -344,6 +344,10 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
       console.error("[v0] Error updating incorrect questions:", error)
     }
 
+    if (username && selectedSet && !isAnonymous) {
+      await saveProgress()
+    }
+
     if (currentQuestion < questions.length - 1) {
       setCurrentQuestion(currentQuestion + 1)
       setSelectedAnswer(null)

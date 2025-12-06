@@ -73,6 +73,7 @@ export async function createUser(username: string, password: string): Promise<vo
       username,
       password: hashedPassword,
       createdAt: Date.now(),
+      lastActive: Date.now(), // Track last activity
       incorrectQuestions: {},
     })
     console.log("[v0] User created:", username)
@@ -296,7 +297,6 @@ export async function clearQuizProgress(username: string, setId: string): Promis
     console.log("[v0] Quiz progress cleared")
   } catch (error) {
     console.error("[v0] Error clearing quiz progress:", error)
-    throw error
   }
 }
 
@@ -335,7 +335,6 @@ export async function removeIncorrectQuestion(username: string, questionId: numb
     console.log("[v0] Removed incorrect question:", questionId)
   } catch (error) {
     console.error("[v0] Error removing incorrect question:", error)
-    throw error
   }
 }
 
@@ -434,6 +433,14 @@ export async function deleteQuestionEdit(questionId: number): Promise<void> {
     console.log("[v0] Question edit deleted:", questionId)
   } catch (error) {
     console.error("[v0] Error deleting question edit:", error)
-    throw error
+  }
+}
+
+export async function updateLastActive(username: string): Promise<void> {
+  try {
+    const lastActiveRef = ref(db, `users/${username}/lastActive`)
+    await set(lastActiveRef, Date.now())
+  } catch (error) {
+    console.error("[v0] Error updating last active:", error)
   }
 }
