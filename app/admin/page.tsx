@@ -2579,7 +2579,7 @@ export default function AdminPage() {
 
         {/* User Statistics */}
         <div className="mb-8">
-          <h2 className="text-2xl font-bold mb-4">Gebruikersstatistieken</h2>
+          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card className="py-2">
               <CardHeader className="pb-0 pt-2 px-4">
