@@ -18,7 +18,7 @@ export default function Page() {
   const [isQuizActive, setIsQuizActive] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [currentCategory, setCurrentCategory] = useState<Category | null>(null)
-  const showAdminButton = email === "laurentstijn@gmail.com"
+  const showAdminButton = email && !isAnonymous
 
   useEffect(() => {
     const loadCategory = async () => {

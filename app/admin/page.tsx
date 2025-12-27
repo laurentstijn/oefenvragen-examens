@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 
 import type React from "react"
 import { useToast } from "@/components/ui/use-toast"
-import { Trash2, X, Plus, FileText, Upload, RefreshCw, Pencil, Download } from "lucide-react"
+import { Trash2, X, Plus, FileText, Upload, Pencil, Download } from "lucide-react"
 import type { Question } from "@/lib/radar-data"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -46,10 +46,11 @@ import {
 } from "@/lib/pdf-parser" // Updated import to include parseQuestionsWithSeries
 import { cn } from "@/lib/utils"
 import { db } from "@/lib/firebase"
-import { ref as refDB, set, remove, get } from "firebase/database" // Renamed ref to refDB to avoid conflict
+import { ref as refDB, set, remove, get, update } from "firebase/database" // Renamed ref to refDB to avoid conflict and added update
 import { useAuth } from "@/contexts/auth-context" // Import AuthContext
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog" // Import Dialog components
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group" // Import RadioGroup components
+import { getAuth } from "firebase/auth" // Import getAuth
 
 const sanitizeForLog = (obj: any): any => {
   if (!obj) return obj
@@ -74,10 +75,11 @@ const sanitizeForLog = (obj: any): any => {
 // Moved helper functions inside component to access state
 export default function AdminPage() {
   const { email, username, loading: authLoading } = useAuth()
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true) // FIXED: Corrected spelling of setIsCheckingAuth
+  const [isCheckingAuth, setIsCheckingCheckingAuth] = useState(true) // FIXED: Corrected spelling of setIsCheckingAuth
   const [isAdmin, setIsAdmin] = useState(false) // New state for admin check
   const router = useRouter()
   const { toast } = useToast()
+  const auth = getAuth() // Initialize Firebase Auth
 
   const [categoryStatuses, setCategoryStatuses] = useState<Record<string, CategoryStatus>>({})
   const [isLoadingStatuses, setIsLoadingStatuses] = useState(true)
@@ -134,7 +136,7 @@ export default function AdminPage() {
   const [showCodeModal, setShowCodeModal] = useState(false)
 
   const [showQuestionBrowser, setShowQuestionBrowser] = useState(false)
-  const [selectedQuestionSet, setSelectedQuestionSet] = useState("all") // Changed to searchTerm
+  const [selectedQuestionSet, setSelectedQuestionSet] = useState("all") // Changed from 'selectedQuestionSet' to 'all'
   const [searchTerm, setSearchTerm] = useState("")
   const [showOnlyMissingImages, setShowOnlyMissingImages] = useState(false)
   // Updated state variables for series and split options
@@ -212,6 +214,83 @@ export default function AdminPage() {
   const [isAddingToExistingCategory, setIsAddingToExistingCategory] = useState(false)
 
   const [isBulkEditMode, setIsBulkEditMode] = useState(false)
+  const [bulkEditTrigger, setBulkEditTrigger] = useState(0)
+
+  const [bulkEditAnswers, setBulkEditAnswers] = useState<Record<string, string>>({})
+
+  const [userStats, setUserStats] = useState({
+    totalUsers: 0,
+    anonymousUsers: 0,
+    totalQuizResults: 0,
+    recentActiveUsers: 0,
+    anonymousQuizResults: 0,
+  })
+  const [isLoadingStats, setIsLoadingStats] = useState(true)
+  const [isExporting, setIsExporting] = useState(false) // NEW: State for export button
+
+  const loadUserStatistics = useCallback(async () => {
+    setIsLoadingStats(true)
+    try {
+      const usersRef = refDB(db, "users")
+      const snapshot = await get(usersRef)
+
+      if (snapshot.exists()) {
+        const users = snapshot.val()
+        let totalUsers = 0
+        let anonymousUsers = 0
+        let totalQuizResults = 0
+        let recentActiveUsers = 0
+        let anonymousQuizResults = 0
+
+        const now = Date.now()
+        const oneDayAgo = now - 24 * 60 * 60 * 1000
+
+        Object.entries(users).forEach(([userId, userData]: [string, any]) => {
+          totalUsers++
+
+          // Check if anonymous (username contains "Anoniem" or "anonymous")
+          const isAnonymous =
+            userData.username?.toLowerCase().includes("anoniem") ||
+            userData.username?.toLowerCase().includes("anonymous") ||
+            userId.includes("anon")
+
+          if (isAnonymous) {
+            anonymousUsers++
+          }
+
+          // Count quiz results
+          if (userData.quizResults) {
+            const quizCount = Object.keys(userData.quizResults).length
+            totalQuizResults += quizCount
+            if (isAnonymous) {
+              anonymousQuizResults += quizCount
+            }
+          }
+
+          // Check if active in last 24 hours
+          if (userData.lastActive) {
+            const lastActive =
+              typeof userData.lastActive === "number" ? userData.lastActive : new Date(userData.lastActive).getTime()
+            if (lastActive > oneDayAgo) {
+              recentActiveUsers++
+            }
+          }
+        })
+
+        setUserStats({
+          totalUsers,
+          anonymousUsers,
+          totalQuizResults,
+          recentActiveUsers,
+          anonymousQuizResults,
+        })
+      }
+    } catch (error) {
+      console.error("[v0] Error loading user statistics:", error)
+    } finally {
+      setIsLoadingStats(false)
+    }
+  }, [])
 
   const handleCategoryIconUpload = (file: File | null) => {
     if (!file) {
@@ -413,11 +492,18 @@ export default function AdminPage() {
   // FIXED: Moved useEffect dependencies to ensure it runs correctly
   useEffect(() => {
     const checkAuth = async () => {
+      console.log("[v0] Admin check starting...")
+      console.log("[v0] authLoading:", authLoading)
+      console.log("[v0] email:", email)
+      console.log("[v0] username:", username)
+
       if (authLoading) {
+        console.log("[v0] Still loading auth, waiting...")
         return
       }
 
       if (!email) {
+        console.log("[v0] No email found, redirecting to home")
         toast({
           title: "Geen toegang",
           description: "Log eerst in met een admin account",
@@ -427,23 +513,14 @@ export default function AdminPage() {
         return
       }
 
-      // Check if email is admin
-      if (email !== "laurentstijn@gmail.com") {
-        toast({
-          title: "Geen toegang",
-          description: "Je hebt geen admin rechten",
-          variant: "destructive",
-        })
-        router.push("/")
-        return
-      }
-
+      // Anyone with a Firebase account can access admin panel
+      console.log("[v0] Email found, granting admin access")
       setIsAdmin(true)
-      setIsCheckingAuth(false)
+      setIsCheckingCheckingAuth(false)
     }
 
     checkAuth()
-  }, [email, authLoading, router, toast]) // Added all dependencies
+  }, [email, authLoading, router, toast, username]) // Added all dependencies
 
   const getCategoryStatusDisplay = (categoryId: string) => {
     return categoryStatuses[categoryId] || "actief"
@@ -560,47 +637,49 @@ export default function AdminPage() {
   const memoizedLoadQuestions = useCallback(loadQuestions, [selectedCategory])
   const memoizedLoadSavedEdits = useCallback(loadSavedEdits, [])
 
-  const handleBulkAnswerClick = useCallback(
-    async (questionId: number, answer: "a" | "b" | "c" | "d") => {
-      if (!isBulkEditMode) return
+  // Modified handleBulkAnswerClick to use bulkEditAnswers state
+  const handleBulkAnswerClick = async (questionId: number, answer: string) => {
+    console.log(`[v0] Bulk editing question ${questionId} to answer ${answer}`)
 
-      const editKey = `${selectedCategory}-${questionId}`
+    const questionKey = `${selectedCategory}-${questionId}`
 
-      try {
-        // Save to Firebase
-        await set(refDB(db, `questionEdits/${editKey}`), {
-          correct: answer,
-          timestamp: Date.now(),
-        })
-
-        // Update local state
-        setSavedEdits((prev) => ({
-          ...prev,
-          [editKey]: {
-            ...prev[editKey],
-            correct: answer,
-          },
-        }))
-
-        // Reload questions to reflect changes
-        await memoizedLoadQuestions() // Use memoized version
-        await memoizedLoadSavedEdits() // Use memoized version
-
-        toast({
-          title: "Antwoord bijgewerkt",
-          description: `Vraag ${questionId}: correct antwoord is nu ${answer.toUpperCase()}`,
-        })
-      } catch (error) {
-        console.error("[v0] Error saving bulk edit:", error)
-        toast({
-          title: "Fout",
-          description: "Er is een fout opgetreden bij het opslaan",
-          variant: "destructive",
-        })
+    console.log("[v0] Setting bulkEditAnswers state NOW")
+    setBulkEditAnswers((prev) => {
+      const updated = {
+        ...prev,
+        [questionKey]: answer.toUpperCase(),
       }
-    },
-    [isBulkEditMode, selectedCategory, toast, memoizedLoadQuestions, memoizedLoadSavedEdits], // Use memoized functions
-  )
+      console.log("[v0] BulkEditAnswers updated:", updated)
+      return updated
+    })
+
+    console.log("[v0] State update called, starting Firebase update")
+
+    try {
+      // Update in Firebase
+      await update(refDB(db, `questions/${selectedCategory}/${questionKey}`), {
+        correctAnswer: answer.toUpperCase(),
+      })
+
+      console.log(`[v0] Successfully updated question ${questionId} in Firebase`)
+      toast({
+        title: "Antwoord bijgewerkt",
+        description: `Vraag ${questionId}: correct antwoord is nu ${answer.toUpperCase()}`,
+      })
+    } catch (error) {
+      console.error("[v0] Error saving bulk edit:", error)
+      toast({
+        title: "Fout",
+        description: "Kon het correcte antwoord niet opslaan",
+        variant: "destructive",
+      })
+      setBulkEditAnswers((prev) => {
+        const updated = { ...prev }
+        delete updated[questionKey]
+        return updated
+      })
+    }
+  }
 
   // Reusable function to load category statuses
   const loadCategoryStatuses = async () => {
@@ -664,6 +743,10 @@ export default function AdminPage() {
   useEffect(() => {
     loadAllCategories()
   }, [])
+
+  useEffect(() => {
+    loadUserStatistics()
+  }, [loadUserStatistics])
 
   const isStaticCategory = false // Removed check for static categories
 
@@ -807,6 +890,8 @@ export default function AdminPage() {
     searchTerm,
     selectedQuestionSet,
     showOnlyMissingImages,
+    bulkEditTrigger, // Add trigger as dependency to force recalculation
+    bulkEditAnswers, // Add bulkEditAnswers to dependency array
   ])
 
   const getQuestionCountForSet = useCallback(
@@ -819,6 +904,21 @@ export default function AdminPage() {
     },
     [filteredQuestions],
   )
+
+  // Helper function to get the correct answer, considering bulk edits
+  const getDisplayCorrectAnswer = (question: any) => {
+    const questionKey = `${selectedCategory}-${question.id}`
+    const bulkAnswer = bulkEditAnswers[questionKey]
+    const finalAnswer = bulkAnswer || question.correctAnswer?.toUpperCase()
+
+    if (question.id === 1) {
+      console.log(
+        `[v0] Display answer for Q1: bulk=${bulkAnswer}, original=${question.correctAnswer}, final=${finalAnswer}`,
+      )
+    }
+
+    return finalAnswer
+  }
 
   if (isCheckingAuth) {
     return (
@@ -2066,6 +2166,7 @@ export default function AdminPage() {
 
   // ADD: Function to export all categories at once
   const handleExportAllCategories = async () => {
+    setIsExporting(true) // Set exporting state
     try {
       const categories = await getAllCategories()
 
@@ -2155,6 +2256,8 @@ export default function AdminPage() {
     } catch (error) {
       console.error("Error exporting all categories:", error)
       alert("Er is een fout opgetreden bij het exporteren van alle categorieën.")
+    } finally {
+      setIsExporting(false) // Reset exporting state
     }
   }
 
@@ -2324,8 +2427,6 @@ export default function AdminPage() {
   //   }
   // };
 
-  // Removed duplicate handleOptionImageUpload function (already handled above)
-
   const handleRenameSeries = async () => {
     if (!selectedCategory || !renameSeriesOldName || !renameSeriesNewName) {
       toast({
@@ -2456,18 +2557,54 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       <div className="max-w-7xl mx-auto px-4 py-8">
         <div className="flex items-center justify-between mb-8">
           <h1 className="text-3xl font-bold text-foreground">Admin Panel</h1>
           <div className="flex items-center gap-4">
-            {email && <span className="text-sm text-muted-foreground">{email}</span>} {/* Display user email */}
+            {email && <span className="text-sm text-muted-foreground">{email}</span>}
             {isLoading && <span className="text-sm text-muted-foreground">Laden...</span>}
             <Link href="/">
               <Button variant="outline">Terug naar Home</Button>
             </Link>
           </div>
         </div>
+
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>Gebruikersstatistieken</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLoadingStats ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                <div className="p-4 rounded-lg border bg-card">
+                  <div className="text-2xl font-bold text-foreground">{userStats.totalUsers}</div>
+                  <div className="text-sm text-muted-foreground">Totaal Gebruikers</div>
+                </div>
+                <div className="p-4 rounded-lg border bg-card">
+                  <div className="text-2xl font-bold text-foreground">{userStats.anonymousUsers}</div>
+                  <div className="text-sm text-muted-foreground">Anonieme Gebruikers</div>
+                </div>
+                <div className="p-4 rounded-lg border bg-card">
+                  <div className="text-2xl font-bold text-foreground">{userStats.anonymousQuizResults}</div>
+                  <div className="text-sm text-muted-foreground">Anoniem Gebruik</div>
+                </div>
+                <div className="p-4 rounded-lg border bg-card">
+                  <div className="text-2xl font-bold text-foreground">{userStats.totalQuizResults}</div>
+                  <div className="text-sm text-muted-foreground">Totaal Quiz Resultaten</div>
+                </div>
+                <div className="p-4 rounded-lg border bg-card">
+                  <div className="text-2xl font-bold text-foreground">{userStats.recentActiveUsers}</div>
+                  <div className="text-sm text-muted-foreground">Actief (laatste 24u)</div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <Card className="mb-8">
           <CardHeader>
@@ -2496,25 +2633,10 @@ export default function AdminPage() {
             <CardTitle>Database Beheer</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {/* CHANGE: Add full backup button at the top */}
-            <Button onClick={handleExportAllCategories} className="w-full gap-2" variant="default">
+            {/* CHANGE: Removed maintenance buttons and their associated state/handlers */}
+            <Button onClick={handleExportAllCategories} disabled={isExporting} className="w-full gap-2">
               <Download className="h-4 w-4" />
               Exporteer Volledige Backup (Alle Categorieën)
-            </Button>
-
-            <Button onClick={() => setShowStaticMigration(true)} className="w-full gap-2" variant="default">
-              <Upload className="h-4 w-4" />
-              Migreer Statische Vragen
-            </Button>
-
-            <Button onClick={() => setShowReeksUpdate(true)} className="w-full gap-2" variant="default">
-              <RefreshCw className="h-4 w-4" />
-              Update Reeksen op Bestaande Vragen
-            </Button>
-
-            <Button onClick={() => setShowTimestampMigration(true)} className="w-full gap-2" variant="outline">
-              <RefreshCw className="h-4 w-4" />
-              Converteer Timestamps
             </Button>
           </CardContent>
         </Card>
@@ -3581,7 +3703,7 @@ export default function AdminPage() {
                                       onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "a")}
                                       className={cn(
                                         "flex items-center gap-2",
-                                        question.correctAnswer?.toUpperCase() === "A" && "text-green-600 font-semibold",
+                                        getDisplayCorrectAnswer(question) === "A" && "text-green-600 font-semibold",
                                         isBulkEditMode &&
                                           "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
                                       )}
@@ -3601,7 +3723,7 @@ export default function AdminPage() {
                                       onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "b")}
                                       className={cn(
                                         "flex items-center gap-2",
-                                        question.correctAnswer?.toUpperCase() === "B" && "text-green-600 font-semibold",
+                                        getDisplayCorrectAnswer(question) === "B" && "text-green-600 font-semibold",
                                         isBulkEditMode &&
                                           "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
                                       )}
@@ -3611,7 +3733,7 @@ export default function AdminPage() {
                                         <img
                                           src={question.optionImages.b || "/placeholder.svg"}
                                           alt="Optie B"
-                                          className="max-w-[100px] max-h-12 rounded border"
+                                          className="max-w-[1100px] max-h-12 rounded border"
                                         />
                                       )}
                                     </p>
@@ -3621,7 +3743,7 @@ export default function AdminPage() {
                                       onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "c")}
                                       className={cn(
                                         "flex items-center gap-2",
-                                        question.correctAnswer?.toUpperCase() === "C" && "text-green-600 font-semibold",
+                                        getDisplayCorrectAnswer(question) === "C" && "text-green-600 font-semibold",
                                         isBulkEditMode &&
                                           "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
                                       )}
@@ -3641,7 +3763,7 @@ export default function AdminPage() {
                                       onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "d")}
                                       className={cn(
                                         "flex items-center gap-2",
-                                        question.correctAnswer?.toUpperCase() === "D" && "text-green-600 font-semibold",
+                                        getDisplayCorrectAnswer(question) === "D" && "text-green-600 font-semibold",
                                         isBulkEditMode &&
                                           "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
                                       )}

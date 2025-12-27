@@ -2,9 +2,8 @@
   "rules": {
     "users": {
       ".read": "true",
-      ".write": "true",
-      "$username": {
-        ".indexOn": ["username"],
+      "$userId": {
+        ".write": "true",
         "quizResults": {
           ".indexOn": ["completedAt", "score"]
         },
@@ -15,7 +14,10 @@
     },
     "questionEdits": {
       ".read": "true",
-      ".write": "true"
+      ".write": "true",
+      "$editKey": {
+        ".validate": "newData.hasChildren(['correct', 'timestamp'])"
+      }
     },
     "questions": {
       ".read": "true",
@@ -43,10 +45,6 @@
       "$categoryId": {
         ".indexOn": ["status", "updatedAt"]
       }
-    },
-    "admins": {
-      ".read": "true",
-      ".write": "true"
     }
   }
 }
