@@ -2581,25 +2581,25 @@ export default function AdminPage() {
         <div className="mb-8">
           <h2 className="text-2xl font-bold mb-4">Gebruikersstatistieken</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-4xl font-bold">{userStats.totalUsers}</CardTitle>
-                <CardDescription>Totaal Gebruikers</CardDescription>
+            <Card className="py-2">
+              <CardHeader className="pb-0 pt-2 px-4">
+                <CardTitle className="text-xl font-bold">{userStats.totalUsers}</CardTitle>
+                <CardDescription className="text-[10px]">Totaal Gebruikers</CardDescription>
               </CardHeader>
             </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-4xl font-bold">{userStats.anonymousClicks || 0}</CardTitle>
-                <CardDescription>Anoniem Gebruik</CardDescription>
+            <Card className="py-2">
+              <CardHeader className="pb-0 pt-2 px-4">
+                <CardTitle className="text-xl font-bold">{userStats.anonymousClicks || 0}</CardTitle>
+                <CardDescription className="text-[10px]">Anoniem Gebruik</CardDescription>
               </CardHeader>
-              <CardFooter className="pt-2 pb-4">
+              <CardFooter className="pt-2 pb-0 px-4">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleResetAnonymousClicks}
-                  className="w-full bg-transparent"
+                  className="w-full bg-transparent h-6 text-[10px] py-0"
                 >
-                  <RotateCcw className="w-4 h-4 mr-2" />
+                  <RotateCcw className="w-2.5 h-2.5 mr-1" />
                   Reset
                 </Button>
               </CardFooter>
