@@ -2580,7 +2580,7 @@ export default function AdminPage() {
         {/* User Statistics */}
         <div className="mb-8">
           <h2 className="text-2xl font-bold mb-4">Gebruikersstatistieken</h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-4xl font-bold">{userStats.totalUsers}</CardTitle>
@@ -2603,18 +2603,6 @@ export default function AdminPage() {
                   Reset
                 </Button>
               </CardFooter>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-4xl font-bold">{userStats.totalQuizResults}</CardTitle>
-                <CardDescription>Totaal Quiz Resultaten</CardDescription>
-              </CardHeader>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-4xl font-bold">{userStats.recentActiveUsers}</CardTitle>
-                <CardDescription>Actief (laatste 24u)</CardDescription>
-              </CardHeader>
             </Card>
           </div>
         </div>
