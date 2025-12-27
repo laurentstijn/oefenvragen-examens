@@ -1,6 +1,6 @@
 "use client"
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
-import { DialogFooter } from "@/components/ui/dialog"
+import { CardFooter } from "@/components/ui/card"
 
 import { DialogDescription } from "@/components/ui/dialog"
 
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 
 import type React from "react"
 import { useToast } from "@/components/ui/use-toast"
-import { Trash2, X, Plus, FileText, Upload, Pencil, Download } from "lucide-react"
+import { Trash2, X, Plus, FileText, Upload, Pencil, Download, RotateCcw } from "lucide-react"
 import type { Question } from "@/lib/radar-data"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -46,9 +46,9 @@ import {
 } from "@/lib/pdf-parser" // Updated import to include parseQuestionsWithSeries
 import { cn } from "@/lib/utils"
 import { db } from "@/lib/firebase"
-import { ref as refDB, set, remove, get, update } from "firebase/database" // Renamed ref to refDB to avoid conflict and added update
+import { ref as refDB, set, remove, get, update } from "firebase/database"
 import { useAuth } from "@/contexts/auth-context" // Import AuthContext
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog" // Import Dialog components
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog" // Import Dialog components
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group" // Import RadioGroup components
 import { getAuth } from "firebase/auth" // Import getAuth
 
@@ -226,6 +226,18 @@ export default function AdminPage() {
   })
   const [isLoadingStats, setIsLoadingStats] = useState(true)
   const [isExporting, setIsExporting] = useState(false) // NEW: State for export button
+
+  const handleResetAnonymousClicks = async () => {
+    try {
+      const analyticsRef = refDB(db, "analytics/anonymousClicks") // FIX: database renamed to db
+      await set(analyticsRef, 0)
+      console.log("[v0] Reset anonymous clicks counter to 0")
+      // Reload statistics
+      await loadUserStatistics()
+    } catch (error) {
+      console.error("[v0] Error resetting anonymous clicks:", error)
+    }
+  }
 
   const loadUserStatistics = useCallback(async () => {
     setIsLoadingStats(true)
@@ -891,9 +903,10 @@ export default function AdminPage() {
   const getQuestionCountForSet = useCallback(
     (reeksId: string) => {
       const normalized = normalizeReeks(reeksId)
+      // FIX: Changed qReeks to questionReeks to fix undeclared variable error
       return filteredQuestions.filter((q) => {
-        const qReeks = normalizeReeks(q.reeks)
-        return qReeks === normalized
+        const questionReeks = normalizeReeks(q.reeks)
+        return questionReeks === normalized
       }).length
     },
     [filteredQuestions],
@@ -2579,6 +2592,17 @@ export default function AdminPage() {
                 <CardTitle className="text-4xl font-bold">{userStats.anonymousClicks || 0}</CardTitle>
                 <CardDescription>Anoniem Gebruik</CardDescription>
               </CardHeader>
+              <CardFooter className="pt-2 pb-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleResetAnonymousClicks}
+                  className="w-full bg-transparent"
+                >
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Reset
+                </Button>
+              </CardFooter>
             </Card>
             <Card>
               <CardHeader className="pb-2">

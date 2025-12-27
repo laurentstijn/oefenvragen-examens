@@ -84,6 +84,11 @@ export function CategorySelector({ onSelectCategory }: CategorySelectorProps) {
       <div className="grid gap-4 md:grid-cols-2">
         {categories
           .filter((category) => category.status === "actief" || category.status === "binnenkort")
+          .sort((a, b) => {
+            if (a.status === "actief" && b.status !== "actief") return -1
+            if (a.status !== "actief" && b.status === "actief") return 1
+            return 0
+          })
           .map((category) => {
             const isActive = category.status === "actief"
 
