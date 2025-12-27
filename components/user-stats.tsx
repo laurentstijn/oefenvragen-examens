@@ -5,15 +5,16 @@ import { useAuth } from "@/contexts/auth-context"
 import { getUserStats, resetUserStats, type UserStats } from "@/lib/firebase-service"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { LogOut, Trophy, TrendingUp, BookOpen, RotateCcw } from "lucide-react"
+import { Trophy, TrendingUp, BookOpen, RotateCcw } from "lucide-react"
 
 interface UserStatsPanelProps {
   refreshTrigger?: number
   onDataReset?: () => void
+  category?: string // Added category prop
 }
 
-export function UserStatsPanel({ refreshTrigger, onDataReset }: UserStatsPanelProps) {
-  const { username, signOut } = useAuth()
+export function UserStatsPanel({ refreshTrigger, onDataReset, category = "radar" }: UserStatsPanelProps) {
+  const { username } = useAuth()
   const [stats, setStats] = useState<UserStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [resetting, setResetting] = useState(false)
@@ -22,14 +23,14 @@ export function UserStatsPanel({ refreshTrigger, onDataReset }: UserStatsPanelPr
     if (username) {
       loadStats()
     }
-  }, [username, refreshTrigger])
+  }, [username, refreshTrigger, category]) // Added category to dependency array
 
   const loadStats = async () => {
     if (!username) return
 
-    console.log("[v0] Loading user stats for:", username)
+    console.log("[v0] Loading user stats for:", username, "category:", category)
     try {
-      const userStats = await getUserStats(username)
+      const userStats = await getUserStats(username, category)
       console.log("[v0] User stats loaded:", userStats)
       setStats(userStats)
     } catch (error) {
@@ -43,14 +44,14 @@ export function UserStatsPanel({ refreshTrigger, onDataReset }: UserStatsPanelPr
     if (!username) return
 
     const confirmed = window.confirm(
-      "Weet je zeker dat je al je statistieken wilt resetten? Dit verwijdert alle quiz resultaten en opgeslagen voortgang. Dit kan niet ongedaan worden gemaakt.",
+      `Weet je zeker dat je je statistieken voor deze categorie wilt resetten? Dit verwijdert alle resultaten voor deze categorie. Dit kan niet ongedaan worden gemaakt.`,
     )
 
     if (!confirmed) return
 
     setResetting(true)
     try {
-      await resetUserStats(username)
+      await resetUserStats(username, category)
       await loadStats()
       if (onDataReset) {
         onDataReset()
@@ -81,11 +82,6 @@ export function UserStatsPanel({ refreshTrigger, onDataReset }: UserStatsPanelPr
               <RotateCcw className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
               <span className="hidden sm:inline">{resetting ? "Resetten..." : "Reset Stats"}</span>
               <span className="sm:hidden">Reset</span>
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => signOut()} className="text-xs sm:text-sm px-2 sm:px-3">
-              <LogOut className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-              <span className="hidden sm:inline">Uitloggen</span>
-              <span className="sm:hidden">Uit</span>
             </Button>
           </div>
         </div>

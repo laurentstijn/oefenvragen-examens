@@ -75,7 +75,7 @@ const qWithImageAnswers = (
 })
 
 // All question sets with correct data from PDF
-export const questionSets: QuestionSet[] = [
+export const radarQuestionSets: QuestionSet[] = [
   {
     id: "set1",
     name: "Reeks 1",
@@ -370,14 +370,7 @@ export const questionSets: QuestionSet[] = [
         "Zij gaan over in licht en worden direct nadien vernietigd",
         "b",
       ),
-      q(
-        38,
-        "Hoe is de kleinst mogelijke puntgrootte?",  
-        "1,5 vierkante mm",
-        "0,5 vierkante mm",
-        "2 vierkante mm", 
-        "b",
-      ),
+      q(38, "Hoe is de kleinst mogelijke puntgrootte?", "1,5 vierkante mm", "0,5 vierkante mm", "2 vierkante mm", "b"),
       q(
         39,
         "Hoeveel meter bedraagt het afstandsonderscheidingsvermogen van een rivierradar?",
@@ -1658,7 +1651,7 @@ export const questionSets: QuestionSet[] = [
       ),
       q(
         209,
-        "De tijd tussen uitzenden en ontvangen van de elektromagnetische golf bedraagt 60 μs. Hoeveel bedraagt de afstand?",
+        "De tijd tussen uitzending en ontvangst van de elektromagnetische golf bedraagt 60 μs. Hoeveel bedraagt de afstand?",
         "18.000 m.",
         "9.000 m.",
         "900 m.",
@@ -1933,7 +1926,7 @@ export const questionSets: QuestionSet[] = [
       ),
       q(
         246,
-        "Onder het begrip RELATIEVE KOERS wordt verstaan: de richting en zin waarin de echo's van andere voorwerpen zich over het scherm verplaatsen.", 
+        "Onder het begrip RELATIEVE KOERS wordt verstaan: de richting en zin waarin de echo's van andere voorwerpen zich over het scherm verplaatsen.",
         "Hierdoor is de ware koers en snelheid van deze voorwerpen te bepalen",
         "Hierdoor is de ware koers en snelheid van deze voorwerpen niet te bepalen",
         "Hierdoor is de ware koers en snelheid van deze voorwerpen misschien te bepalen",
@@ -1983,12 +1976,14 @@ export const questionSets: QuestionSet[] = [
   },
 ]
 
+export const questionSets = radarQuestionSets
+
 import { getQuestionEdits } from "./firebase-service"
 
 export async function getAllQuestionsWithEdits(): Promise<Question[]> {
   try {
     const edits = await getQuestionEdits()
-    const allQuestions = questionSets.flatMap((set) => set.questions)
+    const allQuestions = radarQuestionSets.flatMap((set) => set.questions)
 
     return allQuestions.map((q) => {
       const edit = edits.get(q.id)
@@ -2007,11 +2002,11 @@ export async function getAllQuestionsWithEdits(): Promise<Question[]> {
     })
   } catch (error) {
     console.error("[v0] Failed to load edits, using original questions:", error)
-    return questionSets.flatMap((set) => set.questions)
+    return radarQuestionSets.flatMap((set) => set.questions)
   }
 }
 
 export function getQuestionsByIds(ids: number[]): Question[] {
-  const allQuestions = questionSets.flatMap((set) => set.questions)
+  const allQuestions = radarQuestionSets.flatMap((set) => set.questions)
   return ids.map((id) => allQuestions.find((q) => q.id === id)).filter((q): q is Question => q !== undefined)
 }

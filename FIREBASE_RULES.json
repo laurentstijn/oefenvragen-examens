@@ -1,0 +1,52 @@
+{
+  "rules": {
+    "users": {
+      ".read": "true",
+      ".write": "true",
+      "$username": {
+        ".indexOn": ["username"],
+        "quizResults": {
+          ".indexOn": ["completedAt", "score"]
+        },
+        "quizProgress": {
+          ".indexOn": ["timestamp"]
+        }
+      }
+    },
+    "questionEdits": {
+      ".read": "true",
+      ".write": "true"
+    },
+    "questions": {
+      ".read": "true",
+      ".write": "true",
+      "$categoryId": {
+        "$questionId": {
+          ".indexOn": ["id"]
+        }
+      }
+    },
+    "deletedQuestions": {
+      ".read": "true",
+      ".write": "true"
+    },
+    "categories": {
+      ".read": "true",
+      ".write": "true",
+      "$categoryId": {
+        ".indexOn": ["status"]
+      }
+    },
+    "categoryStatus": {
+      ".read": "true",
+      ".write": "true",
+      "$categoryId": {
+        ".indexOn": ["status", "updatedAt"]
+      }
+    },
+    "admins": {
+      ".read": "true",
+      ".write": "true"
+    }
+  }
+}

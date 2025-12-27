@@ -41,7 +41,13 @@ export default function RootLayout({
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0" />
       </head>
-      <body className={`font-sans antialiased`}>
+      <body className={`font-sans antialiased relative`}>
+        <div
+          className="fixed inset-0 bg-cover bg-center bg-no-repeat -z-10"
+          style={{ backgroundImage: "url(/images/achtergrond-e-learning.jpg)" }}
+        />
+        <div className="fixed inset-0 bg-background/40 -z-10" />
+
         <AuthProvider>
           <BodyWrapper>{children}</BodyWrapper>
         </AuthProvider>

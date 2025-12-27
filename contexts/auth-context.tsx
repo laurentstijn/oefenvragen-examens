@@ -11,6 +11,7 @@ import {
 
 interface AuthContextType {
   username: string | null
+  email: string | null
   loading: boolean
   isAnonymous: boolean
   signIn: (username: string, password: string, isNewUser: boolean) => Promise<void>
@@ -20,6 +21,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({
   username: null,
+  email: null,
   loading: true,
   isAnonymous: false,
   signIn: async () => {},
@@ -29,6 +31,7 @@ const AuthContext = createContext<AuthContextType>({
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [username, setUsername] = useState<string | null>(null)
+  const [email, setEmail] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [isAnonymous, setIsAnonymous] = useState(false)
 
@@ -37,10 +40,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (anonymousMode === "true") {
       setIsAnonymous(true)
       setUsername("Anoniem")
+      setEmail(null)
     } else {
       const storedUsername = localStorage.getItem("quiz_username")
+      const storedEmail = localStorage.getItem("quiz_email")
       if (storedUsername) {
         setUsername(storedUsername)
+        setEmail(storedEmail)
       }
     }
     setLoading(false)
@@ -74,6 +80,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await updateLastActive(username)
 
       localStorage.setItem("quiz_username", username)
+      if (username.includes("@")) {
+        localStorage.setItem("quiz_email", username)
+        setEmail(username)
+      } else {
+        localStorage.removeItem("quiz_email")
+        setEmail(null)
+      }
       localStorage.removeItem("quiz_anonymous")
       setUsername(username)
       setIsAnonymous(false)
@@ -86,19 +99,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInAnonymously = () => {
     localStorage.setItem("quiz_anonymous", "true")
     localStorage.removeItem("quiz_username")
+    localStorage.removeItem("quiz_email")
     setUsername("Anoniem")
+    setEmail(null)
     setIsAnonymous(true)
   }
 
   const signOut = () => {
     localStorage.removeItem("quiz_username")
     localStorage.removeItem("quiz_anonymous")
+    localStorage.removeItem("quiz_email")
     setUsername(null)
+    setEmail(null)
     setIsAnonymous(false)
   }
 
   return (
-    <AuthContext.Provider value={{ username, loading, isAnonymous, signIn, signInAnonymously, signOut }}>
+    <AuthContext.Provider value={{ username, email, loading, isAnonymous, signIn, signInAnonymously, signOut }}>
       {children}
     </AuthContext.Provider>
   )

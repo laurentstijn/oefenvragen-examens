@@ -12,7 +12,10 @@ const firebaseConfig = {
   databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
 }
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp()
+// Initialize Firebase
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig)
+
+// Initialize Firebase services
 export const db = getDatabase(app)
-export const database = db
 export const auth = getAuth(app)
+export { app }

@@ -1,555 +1,4308 @@
 "use client"
-import { useState, useMemo, useEffect } from "react"
-import type React from "react"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import { DialogFooter } from "@/components/ui/dialog"
 
-import { questionSets, type Question } from "@/lib/questions-data"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { DialogDescription } from "@/components/ui/dialog"
+
+import { Label } from "@/components/ui/label"
+
+import type React from "react"
+import { useToast } from "@/components/ui/use-toast"
+import { Trash2, X, Plus, FileText, Upload, RefreshCw, Pencil, Download } from "lucide-react"
+import type { Question } from "@/lib/radar-data"
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ChevronLeft, Search, Download, Database } from "lucide-react"
-import Link from "next/link"
-import { QuestionEditor } from "@/components/question-editor"
-import { useAuth } from "@/contexts/auth-context"
+import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useRouter } from "next/navigation"
+import Link from "next/link" // Import Link for navigation
 import {
-  checkOldDataExists,
-  inspectOldData,
-  deleteOldDataNodes,
-  migrateOldDataToNewStructure,
-  type MigrationReport,
+  saveQuestionToFirebase,
+  saveCategory,
+  saveCategoryStatus,
+  getAllCategoryStatuses,
+  migrateTimestamps,
+  migrateStaticQuestionsToFirebase,
+  updateExistingQuestionsWithReeks,
+  getAllCategories,
+  loadQuestionsFromFirebase, // Imported loadQuestionsFromFirebase
+  deleteCategory, // Fixed import name from deleteCategoryFromFirebase to deleteCategory
+  type QuestionEdit, // Added QuestionEdit type import
+  addCategoryToFirebase, // Import addCategoryToFirebase
+  getAllQuestions, // Import getAllQuestions
+  renameSeriesInCategory, // Import renameSeriesInCategory
+  renameCategoryId, // Added import for renameCategoryId
+  deleteSeriesFromCategory, // Added import for deleteSeriesFromCategory
 } from "@/lib/firebase-service"
+import type { CategoryStatus } from "@/lib/categories-data"
+// Removed imports of static question sets: questionSets as radarQuestionSets, questionSets as matrozenQuestionSets
+import {
+  type ParsedQuestion,
+  parseQuestionsFromText,
+  parseQuestionsWithSeries,
+  extractText, // Imported extractText
+} from "@/lib/pdf-parser" // Updated import to include parseQuestionsWithSeries
+import { cn } from "@/lib/utils"
+import { db } from "@/lib/firebase"
+import { ref as refDB, set, remove, get } from "firebase/database" // Renamed ref to refDB to avoid conflict
+import { useAuth } from "@/contexts/auth-context" // Import AuthContext
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog" // Import Dialog components
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group" // Import RadioGroup components
 
+const sanitizeForLog = (obj: any): any => {
+  if (!obj) return obj
+  if (typeof obj !== "object") return obj
+  if (Array.isArray(obj)) return obj.map(sanitizeForLog)
+
+  const sanitized: any = {}
+  for (const key in obj) {
+    const value = obj[key]
+    // Truncate base64 image strings
+    if (typeof value === "string" && (value.startsWith("data:image/") || key.toLowerCase().includes("image"))) {
+      sanitized[key] = `[IMAGE_DATA: ${value.substring(0, 30)}... (${value.length} chars)]`
+    } else if (typeof value === "object") {
+      sanitized[key] = sanitizeForLog(value)
+    } else {
+      sanitized[key] = value
+    }
+  }
+  return sanitized
+}
+
+// Moved helper functions inside component to access state
 export default function AdminPage() {
-  const { username, loading } = useAuth()
+  const { email, username, loading: authLoading } = useAuth()
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true) // FIXED: Corrected spelling of setIsCheckingAuth
+  const [isAdmin, setIsAdmin] = useState(false) // New state for admin check
   const router = useRouter()
-  const [isAuthorized, setIsAuthorized] = useState(false)
-  const [password, setPassword] = useState("")
-  const [showPasswordPrompt, setShowPasswordPrompt] = useState(true)
-  const [selectedSet, setSelectedSet] = useState<string>("all")
-  const [searchQuery, setSearchQuery] = useState("")
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [editedQuestions, setEditedQuestions] = useState<Map<number, Question>>(new Map())
-  const [showExportModal, setShowExportModal] = useState(false)
-  const [showMigrationModal, setShowMigrationModal] = useState(false)
-  const [migrationStatus, setMigrationStatus] = useState<{
-    hasOldProgress: boolean
-    hasOldResults: boolean
-    hasOldIncorrect: boolean
-  } | null>(null)
-  const [oldDataDetails, setOldDataDetails] = useState<{
-    oldProgress: Record<string, any>
-    oldResults: Record<string, any>
-    oldIncorrect: Record<string, any>
-  } | null>(null)
-  const [isDeleting, setIsDeleting] = useState(false)
+  const { toast } = useToast()
+
+  const [categoryStatuses, setCategoryStatuses] = useState<Record<string, CategoryStatus>>({})
+  const [isLoadingStatuses, setIsLoadingStatuses] = useState(true)
+  const [loginError, setLoginError] = useState("") // Kept from original
+
+  // Question management state
+  const [selectedCategory, setSelectedCategory] = useState<string>("radar")
+  const [savedEdits, setSavedEdits] = useState<Record<string, QuestionEdit>>({}) // LINT FIX: Added explicit type for QuestionEdit
+  const [questionNumber, setQuestionNumber] = useState("")
+  const [questionText, setQuestionText] = useState("")
+  const [optionA, setOptionA] = useState("")
+  const [optionB, setOptionB] = useState("")
+  const [optionC, setOptionC] = useState("")
+  const [optionD, setOptionD] = useState("")
+  const [correctAnswer, setCorrectAnswer] = useState<"a" | "b" | "c" | "d">("a")
+  const [isSaving, setIsSaving] = useState(false)
+  const [permissionError, setPermissionError] = useState(false)
+
+  const [showTimestampMigration, setShowTimestampMigration] = useState(false)
   const [isMigrating, setIsMigrating] = useState(false)
-  const [migrationReport, setMigrationReport] = useState<MigrationReport | null>(null)
+  const [migrationResult, setMigrationResult] = useState<any>(null)
 
-  useEffect(() => {
-    if (!loading) {
-      if (!username) {
-        router.push("/")
+  const [showStaticMigration, setShowStaticMigration] = useState(false)
+  const [staticMigrationResult, setStaticMigrationResult] = useState<any>(null)
+  const [isStaticMigrating, setIsStaticMigrating] = useState(false)
+
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [uploadMethod, setUploadMethod] = useState<"text" | "pdf">("text")
+  const [questionsText, setQuestionsText] = useState("")
+  const [parsedQuestions, setParsedQuestions] = useState<ParsedQuestion[]>([])
+  const [editableParsedQuestions, setEditableParsedQuestions] = useState<ParsedQuestion[]>([])
+  const [newCategoryName, setNewCategoryName] = useState("")
+  const [newCategoryDescription, setNewCategoryDescription] = useState("")
+  const [newCategoryIcon, setNewCategoryIcon] = useState<File | null>(null)
+  const [newCategoryIconPreview, setNewCategoryIconPreview] = useState<string>("")
+
+  // const [questionsPerSet, setQuestionsPerSet] = useState(50) // REMOVED - no longer needed for split logic
+  const [isProcessingPdf, setIsProcessingPdf] = useState(false)
+  const [questionImages, setQuestionImages] = useState<Record<number, File>>({})
+
+  const [questionOptionImages, setQuestionOptionImages] = useState<
+    Record<
+      number,
+      {
+        a?: File
+        b?: File
+        c?: File
+        d?: File
       }
-    }
-  }, [username, loading, router])
+    >
+  >({})
 
-  const handlePasswordSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (password === "batelier123") {
-      setIsAuthorized(true)
-      setShowPasswordPrompt(false)
-    } else {
-      alert("Verkeerd wachtwoord")
-      setPassword("")
-    }
-  }
+  const [generatedCode, setGeneratedCode] = useState("")
+  const [showCodeModal, setShowCodeModal] = useState(false)
 
-  const allQuestions = useMemo(() => {
-    return questionSets.flatMap((set) =>
-      set.questions.map((q) => {
-        const edited = editedQuestions.get(q.id)
-        return { ...(edited || q), setName: set.name }
-      }),
-    )
-  }, [editedQuestions])
+  const [showQuestionBrowser, setShowQuestionBrowser] = useState(false)
+  const [selectedQuestionSet, setSelectedQuestionSet] = useState("all") // Changed to searchTerm
+  const [searchTerm, setSearchTerm] = useState("")
+  const [showOnlyMissingImages, setShowOnlyMissingImages] = useState(false)
+  // Updated state variables for series and split options
+  const [uploadModalSelectedSeries, setUploadModalSelectedSeries] = useState("1")
+  const [customReeks, setCustomReeks] = useState("")
+  const [autoSplit, setAutoSplit] = useState<"single" | "split">("single")
 
-  const filteredQuestions = useMemo(() => {
-    let questions = allQuestions
+  const [editingQuestionId, setEditingQuestionId] = useState<number | null>(null)
+  const [editFormData, setEditFormData] = useState({
+    question: "",
+    optionA: "",
+    optionB: "",
+    optionC: "",
+    optionD: "",
+    correct: "a" as "a" | "b" | "c" | "d",
+    questionImage: "" as string,
+    optionAImage: "" as string,
+    optionBImage: "" as string,
+    optionCImage: "" as string,
+    optionDImage: "" as string,
+  })
 
-    if (selectedSet !== "all") {
-      questions = questions.filter((q) => q.setName === selectedSet)
-    }
+  const [showPdfUploadInOverview, setShowPdfUploadInOverview] = useState(false)
+  const [parsedQuestionsForOverview, setParsedQuestionsForOverview] = useState<any[]>([])
+  const [manualQuestionData, setManualQuestionData] = useState({
+    question: "",
+    questionImage: "",
+    optionA: "",
+    optionAImage: "",
+    optionB: "",
+    optionBImage: "",
+    optionC: "",
+    optionCImage: "",
+    optionD: "",
+    optionDImage: "",
+    correctAnswer: "a" as "a" | "b" | "c" | "d",
+    reeks: "1",
+  })
 
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase()
-      questions = questions.filter((q) => q.question.toLowerCase().includes(query) || q.id.toString().includes(query))
-    }
+  const formRef = useRef<HTMLFormElement>(null)
+  const [showManualQuestionForm, setShowManualQuestionForm] = useState(false)
+  const [selectedCorrectAnswer, setSelectedCorrectAnswer] = useState<"a" | "b" | "c" | "d">("a")
+  const [selectedReeks, setSelectedReeks] = useState("all") // Changed default selectedReeks from "1" to "all" so it shows all questions by default
+  const [customReeksInput, setCustomReeksInput] = useState("") // Added state for custom reeks input
 
-    return questions
-  }, [allQuestions, selectedSet, searchQuery])
+  const [firebaseQuestions, setFirebaseQuestions] = useState<Record<string, Question>>({})
+  const [deletedQuestions, setDeletedQuestions] = useState<Set<string>>(new Set())
 
-  const generateQuestionCode = (q: Question): string => {
-    const escapeString = (str: string) => {
-      return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")
-    }
+  const [allCategories, setAllCategories] = useState<
+    Array<{ id: string; name: string; description: string; status: CategoryStatus; icon?: string }>
+  >([])
+  const [editingCategoryIcon, setEditingCategoryIcon] = useState<File | null>(null)
+  const [editingCategoryIconPreview, setEditingCategoryIconPreview] = useState<string>("")
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
+  const [editingCategoryName, setEditingCategoryName] = useState("")
+  const [isLoading, setIsLoading] = useState(true) // Added loading state
 
-    if (q.optionImages) {
-      return `  qWithImageAnswers(${q.id}, "${escapeString(q.question)}", "${q.correct}", {
-    a: "${q.optionImages.a || ""}",
-    b: "${q.optionImages.b || ""}",
-    c: "${q.optionImages.c || ""}"
-  }),`
-    } else if (q.hasImage && q.image) {
-      return `  qWithImage(${q.id}, "${escapeString(q.question)}", { a: "${escapeString(q.options.a)}", b: "${escapeString(q.options.b)}", c: "${escapeString(q.options.c)}" }, "${q.correct}", "${q.image}"),`
-    } else {
-      return `  q(${q.id}, "${escapeString(q.question)}", { a: "${escapeString(q.options.a)}", b: "${escapeString(q.options.b)}", c: "${escapeString(q.options.c)}" }, "${q.correct}"),`
-    }
-  }
+  const [showReeksUpdate, setShowReeksUpdate] = useState(false)
+  const [isReeksUpdating, setIsReeksUpdating] = useState(false)
+  const [reeksUpdateResult, setReeksUpdateResult] = useState<any>(null)
 
-  const exportCode = () => {
-    if (editedQuestions.size === 0) {
-      alert("Geen wijzigingen om te exporteren")
+  // New state to control split behavior in the upload modal
+  const [uploadSplitOption, setUploadSplitOption] = useState<"auto" | "single">("single")
+
+  const [showRenameSeriesDialog, setShowRenameSeriesDialog] = useState(false)
+  const [renameSeriesOldName, setRenameSeriesOldName] = useState("")
+  const [renameSeriesNewName, setRenameSeriesNewName] = useState("")
+  const [isRenamingSeries, setIsRenamingSeries] = useState(false)
+
+  // State for deleting series
+  const [showDeleteSeriesDialog, setShowDeleteSeriesDialog] = useState(false)
+  const [deleteSeriesName, setDeleteSeriesName] = useState("")
+  const [isDeletingSeries, setIsDeletingSeries] = useState(false)
+
+  const [isAddingToExistingCategory, setIsAddingToExistingCategory] = useState(false)
+
+  const [isBulkEditMode, setIsBulkEditMode] = useState(false)
+
+  const handleCategoryIconUpload = (file: File | null) => {
+    if (!file) {
+      setNewCategoryIcon(null)
+      setNewCategoryIconPreview("")
       return
     }
-    setShowExportModal(true)
+
+    setNewCategoryIcon(file)
+
+    // Create preview
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      setNewCategoryIconPreview(reader.result as string)
+    }
+    reader.readAsDataURL(file)
   }
 
-  const handleSaveQuestion = (question: Question) => {
-    setEditedQuestions((prev) => new Map(prev).set(question.id, question))
+  const handleEditCategoryIconUpload = (file: File | null) => {
+    if (!file) {
+      setEditingCategoryIcon(null)
+      setEditingCategoryIconPreview("")
+      return
+    }
+
+    setEditingCategoryIcon(file)
+
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      setEditingCategoryIconPreview(reader.result as string)
+    }
+    reader.readAsDataURL(file)
   }
 
-  const editingQuestion = editingId ? allQuestions.find((q) => q.id === editingId) : null
+  const handleSeriesChange = useCallback((value: string) => {
+    setUploadModalSelectedSeries(value)
+    if (value !== "new") {
+      setCustomReeks("")
+    }
+  }, [])
 
-  const exportedCode = useMemo(() => {
-    if (editedQuestions.size === 0) return ""
+  const handleCustomReeksChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setCustomReeksInput(e.target.value)
+  }, [])
 
-    const sortedEdits = Array.from(editedQuestions.values()).sort((a, b) => a.id - b.id)
+  const normalizeReeks = (reeks: string | number | undefined): string => {
+    if (!reeks) return ""
+    const reeksStr = String(reeks).toLowerCase()
+    // Remove common prefixes like "matrozen-reeks-", "reeks-", "set" etc
+    const cleaned = reeksStr
+      .replace(/^.*-reeks-/, "")
+      .replace(/^reeks-?/, "")
+      .replace(/^set-?/, "")
+      .trim()
+    return cleaned || reeksStr
+  }
 
-    return sortedEdits.map(generateQuestionCode).join("\n")
-  }, [editedQuestions])
+  const handleManualQuestionDataChange = useCallback((newData: typeof manualQuestionData) => {
+    setManualQuestionData(newData)
+  }, [])
 
-  const handleCheckMigrationStatus = async () => {
+  // Helper function to update manualQuestionData state
+  const updateManualQuestionField = useCallback(
+    (field: keyof typeof manualQuestionData, value: string | "a" | "b" | "c" | "d") => {
+      setManualQuestionData((prev) => ({
+        ...prev,
+        [field]: value,
+      }))
+    },
+    [],
+  )
+
+  const handleSaveFromPDF = async (categoryName: string, questionsPerSet: number) => {
+    if (!categoryName.trim()) {
+      alert("Vul een categorie naam in")
+      return
+    }
+
+    if (editableParsedQuestions.length === 0) {
+      alert("Geen vragen gevonden om op te slaan")
+      return
+    }
+
+    const missingAnswers = editableParsedQuestions.filter((q) => !q.correctAnswer)
+    if (missingAnswers.length > 0) {
+      alert(
+        `${missingAnswers.length} vragen hebben nog geen correct antwoord geselecteerd. Selecteer deze eerst in de preview.`,
+      )
+      return
+    }
+
+    const categoryId = categoryName.toLowerCase().replace(/\s+/g, "-")
+
     try {
-      setShowMigrationModal(true)
-      const [status, details] = await Promise.all([checkOldDataExists(), inspectOldData()])
-      setMigrationStatus(status)
-      setOldDataDetails(details)
+      // Use getAllCategories to check for existing category ID
+      const existingCategories = await getAllCategories()
+      if (existingCategories.some((cat) => cat.id === categoryId)) {
+        alert(`Categorie met ID "${categoryId}" bestaat al. Kies een andere naam.`)
+        return
+      }
+
+      await saveCategory(categoryId, categoryName, `Oefenvragen voor het ${categoryName}`)
+
+      // Save questions to Firebase
+      console.log("[v0] Saving new category to Firebase:", categoryId)
+
+      const detectedSeriesName = selectedReeks || "Reeks 1" // Use selectedReeks from state
+
+      for (let i = 0; i < editableParsedQuestions.length; i++) {
+        const question = editableParsedQuestions[i]
+        const questionKey = `${categoryId}-${i + 1}`
+        const reeksNumber = Math.floor(i / questionsPerSet) + 1
+
+        const reeksName = detectedSeriesName || reeksNumber.toString()
+
+        console.log("[v0] Saving question:", {
+          questionKey,
+          questionNumber: i + 1,
+          correctAnswer: question.correctAnswer,
+          reeks: reeksName,
+          hasCorrectAnswer: !!question.correctAnswer,
+        })
+
+        await set(refDB(db, `questions/${categoryId}/${questionKey}`), {
+          id: i + 1,
+          question: question.text,
+          options: {
+            a: question.optionA,
+            b: question.optionB,
+            c: question.optionC,
+            ...(question.optionD && { d: question.optionD }),
+          },
+          correctAnswer: question.correctAnswer?.toUpperCase(),
+          reeks: reeksName,
+        })
+      }
+
+      await saveCategoryStatus(categoryId, "non-actief")
+
+      console.log("[v0] Category saved successfully:", categoryId)
+
+      await loadAllCategories()
+
+      toast({
+        title: "Succes",
+        description: `${editableParsedQuestions.length} vragen succesvol opgeslagen voor ${categoryName} (${detectedSeriesName})`,
+      })
+
+      // Close modal and refresh
+      setShowUploadModal(false)
+      setQuestionsText("")
+      setParsedQuestions([])
+      setEditableParsedQuestions([])
+      setSelectedReeks("1") // Reset to default
+
+      await Promise.all([loadAllQuestions(), loadCategoryStatuses()])
     } catch (error) {
-      alert("Error checking migration status: " + error)
-      setShowMigrationModal(false)
+      console.error("[v0] Error saving category:", error)
+      alert("Er is een fout opgetreden bij het opslaan van de categorie. Probeer het opnieuw.")
     }
   }
 
-  const handleDeleteOldData = async () => {
-    const confirmed = confirm(
-      "WAARSCHUWING: Dit verwijdert de oude top-level nodes (quizProgress, quizResults, incorrectQuestions) uit je database. " +
-        "Zorg dat je een backup hebt gemaakt! Weet je het zeker?",
-    )
-
-    if (!confirmed) return
+  const handleAddCategory = async (name: string, description: string) => {
+    const categoryId = name.toLowerCase().replace(/\s+/g, "-")
 
     try {
-      setIsDeleting(true)
-      await deleteOldDataNodes()
-      alert("Oude data nodes succesvol verwijderd!")
-      setShowMigrationModal(false)
-      setMigrationStatus(null)
-      setOldDataDetails(null)
+      // Check if category already exists
+      const existingCategories = await getAllCategories()
+      if (existingCategories.some((cat) => cat.id === categoryId)) {
+        toast({
+          title: "Fout",
+          description: `Een categorie met ID "${categoryId}" bestaat al. Kies een andere naam.`,
+          variant: "destructive",
+        })
+        return
+      }
+
+      await saveCategory(categoryId, name, description || `Oefenvragen voor ${name}`)
+
+      await set(refDB(db, `categoryStatus/${categoryId}`), "non-actief")
+
+      // Update local state and reload categories
+      setAllCategories((prev) => [...prev, { id: categoryId, name, description, status: "non-actief" }])
+
+      toast({
+        title: "Categorie aangemaakt",
+        description: `De categorie "${name}" is succesvol aangemaakt.`,
+      })
     } catch (error) {
-      alert("Error bij verwijderen: " + error)
-    } finally {
-      setIsDeleting(false)
+      console.error("[v0] Error adding category:", error)
+      toast({
+        title: "Fout",
+        description: "Er is een fout opgetreden bij het aanmaken van de categorie.",
+        variant: "destructive",
+      })
     }
   }
 
-  const handleMigrateData = async () => {
-    const confirmed = confirm(
-      "Dit kopieert alle data van de oude nodes naar de nieuwe structuur onder users/[username]/. " +
-        "De oude nodes blijven staan als backup. Doorgaan?",
-    )
+  // FIXED: Moved useEffect dependencies to ensure it runs correctly
+  useEffect(() => {
+    const checkAuth = async () => {
+      if (authLoading) {
+        return
+      }
 
-    if (!confirmed) return
+      if (!email) {
+        toast({
+          title: "Geen toegang",
+          description: "Log eerst in met een admin account",
+          variant: "destructive",
+        })
+        router.push("/")
+        return
+      }
+
+      // Check if email is admin
+      if (email !== "laurentstijn@gmail.com") {
+        toast({
+          title: "Geen toegang",
+          description: "Je hebt geen admin rechten",
+          variant: "destructive",
+        })
+        router.push("/")
+        return
+      }
+
+      setIsAdmin(true)
+      setIsCheckingAuth(false)
+    }
+
+    checkAuth()
+  }, [email, authLoading, router, toast]) // Added all dependencies
+
+  const getCategoryStatusDisplay = (categoryId: string) => {
+    return categoryStatuses[categoryId] || "actief"
+  }
+
+  const handleStatusChange = async (categoryId: string, status: CategoryStatus) => {
+    setCategoryStatuses((prev) => ({
+      ...prev,
+      [categoryId]: status,
+    }))
+
+    // Update the category in allCategories as well
+    setAllCategories((prev) => prev.map((cat) => (cat.id === categoryId ? { ...cat, status } : cat)))
+
+    console.log(`[v0] Category status saved: ${categoryId} ${status}`)
 
     try {
-      setIsMigrating(true)
-      const report = await migrateOldDataToNewStructure()
-      setMigrationReport(report)
+      await saveCategoryStatus(categoryId, status)
+    } catch (error) {
+      console.error("[v0] Error saving category status:", error)
+      // Reload from Firebase if there was an error to ensure consistency
+      const statuses = await getAllCategoryStatuses()
+      setCategoryStatuses(statuses as Record<string, CategoryStatus>)
+      await loadAllCategories()
+    }
+  }
 
-      if (report.errors.length === 0) {
-        alert(
-          `Migratie succesvol!\n\n` +
-            `Gebruikers: ${report.usersFound.length}\n` +
-            `Progress items: ${Object.values(report.progressMigrated).reduce((a, b) => a + b, 0)}\n` +
-            `Results items: ${Object.values(report.resultsMigrated).reduce((a, b) => a + b, 0)}\n` +
-            `Foute vragen: ${Object.values(report.incorrectQuestionsMigrated).reduce((a, b) => a + b, 0)}`,
-        )
-        // Refresh status
-        const [status, details] = await Promise.all([checkOldDataExists(), inspectOldData()])
-        setMigrationStatus(status)
-        setOldDataDetails(details)
+  // Function to load all questions from Firebase for the selected category
+  const loadQuestions = async (categoryId?: string) => {
+    const currentCategoryId = categoryId || selectedCategory
+    if (!currentCategoryId) {
+      setFirebaseQuestions({})
+      return
+    }
+
+    try {
+      console.log("[v0] Loading Firebase questions for category:", currentCategoryId)
+      const questionsRef = refDB(db, `questions/${currentCategoryId}`)
+      const snapshot = await get(questionsRef)
+
+      if (snapshot.exists()) {
+        const data = snapshot.val()
+        setFirebaseQuestions(data)
+        console.log("[v0] Loaded", Object.keys(data).length, "Firebase questions for", currentCategoryId)
+        const firstQuestionKey = Object.keys(data)[0]
+        if (firstQuestionKey) {
+          console.log("[v0] First question data from Firebase:", {
+            key: firstQuestionKey,
+            hasCorrectAnswer: !!data[firstQuestionKey].correctAnswer,
+            correctAnswer: data[firstQuestionKey].correctAnswer,
+            hasOptions: !!data[firstQuestionKey].options,
+          })
+        }
       } else {
-        alert(`Migratie voltooid met ${report.errors.length} error(s). Check de console voor details.`)
-        console.error("[v0] Migration errors:", report.errors)
+        setFirebaseQuestions({})
+        console.log("[v0] No Firebase questions found for", currentCategoryId)
       }
     } catch (error) {
-      alert("Error tijdens migratie: " + error)
+      console.error("[v0] Error loading Firebase questions:", error)
+      setFirebaseQuestions({})
+    }
+  }
+
+  // Function to load deleted question markers from Firebase
+  const loadDeletedQuestions = async () => {
+    if (!selectedCategory) {
+      setDeletedQuestions(new Set())
+      return
+    }
+
+    try {
+      const deletedRef = refDB(db, `deletedQuestions/${selectedCategory}`)
+      const snapshot = await get(deletedRef)
+
+      if (snapshot.exists()) {
+        const data = snapshot.val()
+        const deletedSet = new Set<string>(Object.keys(data))
+        setDeletedQuestions(deletedSet)
+        console.log("[v0] Loaded", deletedSet.size, "deleted question markers")
+      } else {
+        setDeletedQuestions(new Set())
+      }
+    } catch (error: any) {
+      if (error?.code === "PERMISSION_DENIED" || error?.message?.includes("Permission denied")) {
+        console.log("[v0] Note: Firebase 'deletedQuestions' node needs permissions. Update rules in Firebase Console.")
+      } else {
+        console.error("[v0] Error loading deleted questions:", error)
+      }
+      setDeletedQuestions(new Set())
+    }
+  }
+
+  // Function to load all saved edits from Firebase
+  const loadSavedEdits = async () => {
+    try {
+      const editsRef = refDB(db, "questionEdits")
+      const snapshot = await get(editsRef)
+
+      if (snapshot.exists()) {
+        const editsData = snapshot.val()
+        setSavedEdits(editsData)
+        console.log("[v0] Loaded", Object.keys(editsData).length, "question edits from Firebase")
+        console.log("[v0] Loaded", Object.keys(editsData).length, "saved edits")
+      } else {
+        setSavedEdits({})
+      }
+    } catch (error) {
+      console.error("[v0] Error loading saved edits:", error)
+      setSavedEdits({})
+    }
+  }
+
+  // MEMOIZE loadQuestions and loadSavedEdits for use in useCallback
+  const memoizedLoadQuestions = useCallback(loadQuestions, [selectedCategory])
+  const memoizedLoadSavedEdits = useCallback(loadSavedEdits, [])
+
+  const handleBulkAnswerClick = useCallback(
+    async (questionId: number, answer: "a" | "b" | "c" | "d") => {
+      if (!isBulkEditMode) return
+
+      const editKey = `${selectedCategory}-${questionId}`
+
+      try {
+        // Save to Firebase
+        await set(refDB(db, `questionEdits/${editKey}`), {
+          correct: answer,
+          timestamp: Date.now(),
+        })
+
+        // Update local state
+        setSavedEdits((prev) => ({
+          ...prev,
+          [editKey]: {
+            ...prev[editKey],
+            correct: answer,
+          },
+        }))
+
+        // Reload questions to reflect changes
+        await memoizedLoadQuestions() // Use memoized version
+        await memoizedLoadSavedEdits() // Use memoized version
+
+        toast({
+          title: "Antwoord bijgewerkt",
+          description: `Vraag ${questionId}: correct antwoord is nu ${answer.toUpperCase()}`,
+        })
+      } catch (error) {
+        console.error("[v0] Error saving bulk edit:", error)
+        toast({
+          title: "Fout",
+          description: "Er is een fout opgetreden bij het opslaan",
+          variant: "destructive",
+        })
+      }
+    },
+    [isBulkEditMode, selectedCategory, toast, memoizedLoadQuestions, memoizedLoadSavedEdits], // Use memoized functions
+  )
+
+  // Reusable function to load category statuses
+  const loadCategoryStatuses = async () => {
+    try {
+      console.log("[v0] Loading category statuses from Firebase")
+      const statuses = await getAllCategoryStatuses()
+      console.log("[v0] Loaded category statuses:", statuses)
+      setCategoryStatuses(statuses as Record<string, CategoryStatus>)
+
+      await loadAllCategories()
+    } catch (error) {
+      console.error("[v0] Error loading category statuses:", error)
+    } finally {
+      setIsLoadingStatuses(false)
+    }
+  }
+
+  // Function to load all necessary data (questions, edits, deleted markers) for the selected category
+  const loadAllQuestions = async () => {
+    await loadQuestions()
+    await loadSavedEdits()
+    await loadDeletedQuestions()
+  }
+
+  // Effect to load initial category statuses on mount
+  useEffect(() => {
+    loadCategoryStatuses()
+  }, [])
+
+  // Effect to load all questions when the selected category changes
+  useEffect(() => {
+    if (!selectedCategory) return
+
+    loadQuestions(selectedCategory)
+  }, [selectedCategory])
+
+  // Effect to load saved edits on component mount (only once)
+  useEffect(() => {
+    loadSavedEdits()
+  }, [])
+
+  const loadAllCategories = async () => {
+    try {
+      setIsLoading(true)
+      const dynamicCats = await getAllCategories()
+      const statuses = await getAllCategoryStatuses()
+
+      const combined = dynamicCats.map((cat) => ({
+        ...cat,
+        status: (statuses[cat.id] as CategoryStatus) || "actief",
+      }))
+
+      setAllCategories(combined)
+    } catch (error) {
+      console.error("[v0] Error loading categories:", error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadAllCategories()
+  }, [])
+
+  const isStaticCategory = false // Removed check for static categories
+
+  const availableReeksOptionsWithOriginal = useMemo(() => {
+    const targetCategory = newCategoryName ? newCategoryName.toLowerCase().replace(/\s+/g, "-") : selectedCategory
+
+    if (!targetCategory) {
+      return [
+        { value: "1", label: "Reeks 1", original: "1" },
+        { value: "new", label: "➕ Nieuwe reeks...", original: "" },
+      ]
+    }
+
+    const allQuestionIds = Object.keys(firebaseQuestions)
+
+    const firebaseQs = Object.entries(firebaseQuestions)
+      .filter(([firebaseKey, q]) => {
+        if (!firebaseKey) return false
+        const matches = firebaseKey.startsWith(targetCategory + "-")
+        return matches
+      })
+      .map(([, q]) => q)
+
+    const reeksMap = new Map<string, string>()
+    firebaseQs.forEach((q) => {
+      if (q.reeks) {
+        const normalized = normalizeReeks(q.reeks)
+        const original = String(q.reeks)
+        if (!reeksMap.has(normalized)) {
+          reeksMap.set(normalized, original)
+        }
+      }
+    })
+
+    const options = Array.from(reeksMap.entries())
+      .sort((a, b) => {
+        const numA = Number.parseInt(a[0])
+        const numB = Number.parseInt(b[0])
+        if (!isNaN(numA) && !isNaN(numB)) return numA - numB
+        return a[0].localeCompare(b[0])
+      })
+      .map(([normalized, original]) => ({
+        value: normalized,
+        label: `Reeks ${normalized}`,
+        original: original,
+      }))
+
+    if (options.length === 0 && !newCategoryName) {
+      options.push({ value: "1", label: "Reeks 1", original: "1" })
+    }
+
+    options.push({ value: "new", label: "➕ Nieuwe reeks...", original: "" })
+
+    return options
+  }, [firebaseQuestions, selectedCategory, newCategoryName])
+
+  const availableReeksOptions = useMemo(() => {
+    return availableReeksOptionsWithOriginal.map(({ value, label }) => ({ value, label }))
+  }, [availableReeksOptionsWithOriginal])
+
+  useEffect(() => {
+    if (selectedReeks === "all" || selectedReeks === "new") return
+
+    const reeksExists = availableReeksOptionsWithOriginal.some((opt) => opt.value === selectedReeks)
+
+    if (!reeksExists) {
+      console.log("[v0] Selected reeks", selectedReeks, "no longer exists. Resetting to 'all'")
+      setSelectedReeks("all")
+    }
+  }, [selectedReeks, availableReeksOptionsWithOriginal])
+
+  // Removed activeTsQuestionsCount as it's no longer relevant
+  const totalQuestionsCount = Object.keys(firebaseQuestions).length // Count only Firebase questions
+
+  // Modified to only consider Firebase questions
+  const filteredQuestions = useMemo(() => {
+    if (!selectedCategory) return []
+
+    // Convert firebaseQuestions object to an array of questions
+    // Ensure to handle potential undefined or null values if the structure isn't guaranteed
+    let result = Object.values(firebaseQuestions).filter((q) => q && q.id) // Filter out null/undefined and ensure they have an ID
+
+    const questionsWithEdits = result.map((q) => {
+      // Construct editKey from selectedCategory and question id
+      const editKey = `${selectedCategory}-${q.id}`
+      if (savedEdits[editKey]) {
+        // Ensure 'options' and 'correctAnswer' are properly merged if they exist in savedEdits
+        return {
+          ...q,
+          ...savedEdits[editKey],
+          options: {
+            ...q.options,
+            ...(savedEdits[editKey]?.options || {}),
+          },
+          correctAnswer: savedEdits[editKey]?.correct || q.correctAnswer, // Use 'correct' from edit if available
+        }
+      }
+      return q
+    })
+
+    result = questionsWithEdits
+
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase()
+      result = result.filter(
+        (q) =>
+          q.question.toLowerCase().includes(term) ||
+          Object.values(q.options).some((opt) => opt && opt.toLowerCase().includes(term)) ||
+          q.id.toString().includes(term),
+      )
+    }
+
+    if (selectedQuestionSet !== "all") {
+      const normalizedSet = normalizeReeks(selectedQuestionSet)
+      result = result.filter((q) => {
+        const questionReeks = normalizeReeks(q.reeks || "")
+        return questionReeks === normalizedSet
+      })
+    }
+
+    if (showOnlyMissingImages) {
+      result = result.filter((q) => {
+        const needsImage = !q.image && !q.questionImage // Check both for backwards compatibility
+        const hasImageDescription = q.imageDescription
+        const needsOptionImages = q.optionsHaveImages && (!q.optionImages || Object.keys(q.optionImages).length === 0)
+        return (needsImage && hasImageDescription) || needsOptionImages
+      })
+    }
+
+    // Filter out deleted questions
+    result = result.filter((q) => !deletedQuestions.has(q.id))
+
+    result.sort((a, b) => a.id - b.id)
+
+    return result
+  }, [
+    selectedCategory,
+    firebaseQuestions,
+    savedEdits,
+    deletedQuestions,
+    searchTerm,
+    selectedQuestionSet,
+    showOnlyMissingImages,
+  ])
+
+  const getQuestionCountForSet = useCallback(
+    (reeksId: string) => {
+      const normalized = normalizeReeks(reeksId)
+      return filteredQuestions.filter((q) => {
+        const qReeks = normalizeReeks(q.reeks)
+        return qReeks === normalized
+      }).length
+    },
+    [filteredQuestions],
+  )
+
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Toegang controleren...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!isAdmin) {
+    return null
+  }
+
+  // Function to set the selected category for the question browser
+  const setSelectedCategoryForEdit = (categoryId: string) => {
+    setSelectedCategory(categoryId)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!questionNumber) {
+      alert("Voer een vraagnummer in")
+      return
+    }
+
+    const id = Number.parseInt(questionNumber)
+    if (isNaN(id)) {
+      alert("Vraagnummer moet een getal zijn")
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      const edit: Partial<QuestionEdit> = {
+        timestamp: new Date().toISOString(),
+      }
+
+      if (questionText) edit.question = questionText
+      if (optionA || optionB || optionC || optionD) {
+        // Include option D here
+        edit.options = {}
+        if (optionA) edit.options.a = optionA
+        if (optionB) edit.options.b = optionB
+        if (optionC) edit.options.c = optionC
+        if (optionD) edit.options.d = optionD // Save option D
+      }
+      if (correctAnswer) edit.correct = correctAnswer
+
+      // Construct the edit key using selectedCategory and the question ID
+      const editKey = `${selectedCategory}-${id}`
+      await set(refDB(db, `questionEdits/${editKey}`), edit) // Use set to save the edit directly
+      await loadSavedEdits()
+
+      // Clear form
+      setQuestionNumber("")
+      setQuestionText("")
+      setOptionA("")
+      setOptionB("")
+      setOptionC("")
+      setOptionD("") // Clear option D
+      setCorrectAnswer("a")
+
+      alert("Vraag succesvol aangepast!")
+    } catch (error) {
+      console.error("[v0] Error saving edit:", error)
+      alert("Fout bij opslaan van aanpassing")
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleDeleteEdit = async (editKey: string) => {
+    // Changed to accept editKey
+    const questionId = Number.parseInt(editKey.split("-")[1]) // Extract question ID for confirmation
+    if (!confirm(`Aanpassing van vraag ${questionId} verwijderen?`)) return
+
+    try {
+      // Assuming deleteQuestionEdit now accepts the key
+      // Updated to directly use remove from firebase
+      await remove(refDB(db, `questionEdits/${editKey}`))
+      await loadSavedEdits()
+      toast({
+        title: "Aanpassing verwijderd",
+        description: `Aanpassing voor vraag ${questionId} is verwijderd.`,
+      })
+    } catch (error) {
+      console.error("[v0] Error deleting edit:", error)
+      toast({
+        title: "Fout bij verwijderen",
+        description: "Er is een fout opgetreden bij het verwijderen van de aanpassing.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleTextUpload = () => {
+    setShowUploadModal(true)
+    setUploadMethod("text")
+    // Clear previous state when opening the modal for text upload
+    setQuestionsText("")
+    setEditableParsedQuestions([])
+    setNewCategoryName("") // Reset category name
+    setCustomReeks("") // Clear custom reek input
+    setUploadModalSelectedSeries("1") // Reset series selection
+  }
+
+  const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    console.log("[v0] ========================================")
+    console.log("[v0] PDF UPLOAD STARTED")
+    console.log("[v0] ========================================")
+    console.log("[v0] File:", file.name, `(${(file.size / 1024).toFixed(2)} KB)`)
+    setIsProcessingPdf(true)
+
+    try {
+      const text = await extractText(file)
+      console.log("[v0] ✓ Extracted", text.length, "characters")
+
+      if (!text || text.trim().length === 0) {
+        throw new Error("Geen tekst gevonden in de PDF")
+      }
+
+      setQuestionsText(text)
+
+      const result = parseQuestionsWithSeries(text)
+      console.log("[v0] ✓ Parsed", result.questions.length, "questions")
+
+      if (result.questions.length === 0) {
+        throw new Error("Geen vragen gevonden in de PDF. Controleer het formaat.")
+      }
+
+      setEditableParsedQuestions(result.questions)
+
+      if (showPdfUploadInOverview) {
+        console.log("[v0] Mode: Adding to existing category:", selectedCategory)
+        setNewCategoryName(selectedCategory)
+        setShowPdfUploadInOverview(false)
+        setShowUploadModal(true)
+        setIsAddingToExistingCategory(true)
+      } else {
+        console.log("[v0] Mode: New category")
+        setIsAddingToExistingCategory(false)
+      }
+
+      console.log("[v0] ========================================")
+      console.log("[v0] PDF UPLOAD COMPLETE -", result.questions.length, "questions ready")
+      console.log("[v0] ========================================")
+
+      toast({
+        title: "PDF verwerkt",
+        description: `${result.questions.length} vragen gevonden en klaar voor review.`,
+      })
+    } catch (error) {
+      console.error("[v0] ========================================")
+      console.error("[v0] PDF UPLOAD FAILED")
+      console.error("[v0] ========================================")
+      console.error("[v0] Error:", error)
+      alert(`Fout bij verwerken PDF: ${error instanceof Error ? error.message : "Onbekende fout"}`)
+      setEditableParsedQuestions([])
+      setQuestionsText("")
+    } finally {
+      setIsProcessingPdf(false)
+      // Clear the file input value to allow re-uploading the same file if needed
+      if (event.target) {
+        event.target.value = ""
+      }
+    }
+  }
+
+  const handleParseText = async (file: File) => {
+    if (!questionsText.trim()) {
+      alert("Plak eerst tekst met vragen")
+      return
+    }
+
+    try {
+      const result = parseQuestionsFromText(questionsText) // CORRECTED: Should be parseQuestionsFromText
+      setParsedQuestions(result.questions)
+      setEditableParsedQuestions(result.questions)
+      // setNewCategoryName(selectedCategory) // Removed auto-setting based on selectedCategory
+      console.log("[v0] Text parsing complete, ready for review.")
+
+      if (result.questions.length === 0) {
+        alert(
+          "Geen vragen gevonden. Controleer of het formaat correct is.\n\nVerwacht formaat:\n1. Vraag?\na) Optie A\nb) Optie B\nc) Optie C\n\nLet op: Als het correcte antwoord niet automatisch herkend wordt, kun je dit handmatig aanpassen in de preview hieronder.",
+        )
+      } else {
+        const questionsWithoutAnswer = result.questions.filter((q) => !q.correctAnswer)
+        if (questionsWithoutAnswer.length > 0) {
+          alert(
+            `${questionsWithoutAnswer.length} vragen hebben geen correct antwoord. Je kunt dit handmatig aanpassen in de preview hieronder.`,
+          )
+        }
+      }
+    } catch (error) {
+      console.error("[v0] Error parsing text:", error)
+      alert("Fout bij het parsen van de tekst. Controleer het formaat.")
+    }
+  }
+
+  const handleParseTextInOverview = () => {
+    console.log("[v0] handleParseTextInOverview called")
+    console.log("[v0] questionsText length:", questionsText?.length)
+
+    if (!questionsText.trim()) {
+      alert("Eerst een PDF olisi uploaden")
+      return
+    }
+
+    try {
+      const result = parseQuestionsWithSeries(questionsText)
+      console.log("[v0] Parsed questions count:", result.questions.length)
+
+      if (result.questions.length === 0) {
+        alert("Geen vragen gevonden in de PDF. Controleer het formaat.")
+        return
+      }
+
+      setEditableParsedQuestions(result.questions)
+      setNewCategoryName(selectedCategory) // Use existing category name
+      setShowPdfUploadInOverview(false) // Close the PDF upload dialog
+      setShowUploadModal(true) // Open the main upload modal with parsed questions
+
+      toast({
+        title: "Vragen geparsed",
+        description: `${result.questions.length} vragen gevonden en klaar voor review.`,
+      })
+    } catch (error) {
+      console.error("[v0] Error parsing text:", error)
+      alert("Fout bij het herkennen van vragen")
+    }
+  }
+
+  const updateCorrectAnswer = (questionNumber: number, answer: "A" | "B" | "C" | "D") => {
+    setEditableParsedQuestions((prev) =>
+      prev.map((q) => (q.number === questionNumber ? { ...q, correctAnswer: answer } : q)),
+    )
+  }
+
+  const handleQuestionImageUpload = (questionNumber: number, file: File | null) => {
+    if (!file) {
+      setQuestionImages((prev) => {
+        const updated = { ...prev }
+        delete updated[questionNumber]
+        return updated
+      })
+      return
+    }
+
+    // Validate image file
+    if (!file.type.startsWith("image/")) {
+      alert("Selecteer een geldig afbeeldingsbestand")
+      return
+    }
+
+    setQuestionImages((prev) => ({ ...prev, [questionNumber]: file }))
+    console.log(`[v0] Image uploaded for question ${questionNumber}:`, file.name)
+  }
+
+  const handleOptionImageUpload = (questionNumber: number, option: "a" | "b" | "c" | "d", file: File | null) => {
+    if (!file) {
+      setQuestionOptionImages((prev) => {
+        const updated = { ...prev }
+        if (updated[questionNumber]) {
+          delete updated[questionNumber][option]
+        }
+        // If the option object becomes empty, delete it
+        if (updated[questionNumber] && Object.keys(updated[questionNumber]).length === 0) {
+          delete updated[questionNumber]
+        }
+        return updated
+      })
+      return
+    }
+
+    // Validate image file
+    if (!file.type.startsWith("image/")) {
+      alert("Selecteer een geldig afbeeldingsbestand")
+      return
+    }
+
+    setQuestionOptionImages((prev) => ({
+      ...prev,
+      [questionNumber]: {
+        ...(prev[questionNumber] || {}),
+        [option]: file,
+      },
+    }))
+    console.log(`[v0] Image uploaded for question ${questionNumber}, option ${option}:`, file.name)
+  }
+
+  // Removed duplicate handleOptionImageUpload function (already handled above)
+
+  const handleSaveNewCategoryWithQuestions = async () => {
+    console.log("[v0] ========================================")
+    console.log("[v0] NEW CATEGORY WORKFLOW")
+    console.log("[v0] ========================================")
+    console.log("[v0] Category:", newCategoryName)
+    console.log("[v0] Questions:", editableParsedQuestions.length)
+    console.log("[v0] Series:", uploadModalSelectedSeries === "new" ? customReeksInput : uploadModalSelectedSeries)
+    console.log("[v0] Split:", autoSplit)
+
+    if (!newCategoryName.trim()) {
+      alert("Vul een categorienaam in")
+      return
+    }
+
+    if (editableParsedQuestions.length === 0) {
+      alert("Er zijn geen vragen om op te slaan")
+      return
+    }
+
+    const missingAnswers = editableParsedQuestions.filter((q) => !q.correctAnswer)
+    if (missingAnswers.length > 0) {
+      alert(`${missingAnswers.length} vragen hebben nog geen correct antwoord. Selecteer deze eerst.`)
+      return
+    }
+
+    const missingOptionImages = editableParsedQuestions.filter((q) => {
+      if (!q.optionsHaveImages) return false
+      const optionImages = questionOptionImages[q.number]
+      return (
+        (q.optionAImageDescription && !optionImages?.a) ||
+        (q.optionBImageDescription && !optionImages?.b) ||
+        (q.optionCImageDescription && !optionImages?.c) ||
+        (q.optionDImageDescription && !optionImages?.d)
+      )
+    })
+
+    if (missingOptionImages.length > 0) {
+      alert(`${missingOptionImages.length} vragen hebben nog niet alle optie afbeeldingen geüpload. Upload deze eerst.`)
+      return
+    }
+
+    const convertFileToBase64 = (file: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+    }
+
+    try {
+      const categoryId = newCategoryName.toLowerCase().replace(/\s+/g, "-")
+      const description = newCategoryDescription.trim() || `Oefenvragen voor ${newCategoryName}`
+
+      console.log("[v0] STEP 1: Creating category:", categoryId)
+
+      let iconBase64 = ""
+      if (newCategoryIcon) {
+        iconBase64 = await convertFileToBase64(newCategoryIcon)
+      }
+
+      await addCategoryToFirebase(categoryId, newCategoryName, description, iconBase64)
+      console.log("[v0] ✓ Category created")
+
+      const detectedSeriesName = uploadModalSelectedSeries === "new" ? customReeksInput : uploadModalSelectedSeries
+      const totalQuestions = editableParsedQuestions.length
+      const questionsPerSeries = 50
+
+      console.log("[v0] STEP 2: Saving", totalQuestions, "questions to series:", detectedSeriesName)
+
+      if (autoSplit === "split" && totalQuestions > questionsPerSeries) {
+        const numSeries = Math.ceil(totalQuestions / questionsPerSeries)
+        console.log("[v0] Splitting into", numSeries, "series")
+
+        for (let seriesIndex = 0; seriesIndex < numSeries; seriesIndex++) {
+          const startIdx = seriesIndex * questionsPerSeries
+          const endIdx = Math.min(startIdx + questionsPerSeries, totalQuestions)
+          const seriesQuestions = editableParsedQuestions.slice(startIdx, endIdx)
+          const seriesName = `${detectedSeriesName} (${startIdx + 1}-${endIdx})`
+
+          console.log(
+            `[v0] Saving series ${seriesIndex + 1}/${numSeries}: ${seriesName} (${seriesQuestions.length} questions)`,
+          )
+
+          for (let i = 0; i < seriesQuestions.length; i++) {
+            const question = seriesQuestions[i]
+            const globalQuestionNumber = startIdx + i + 1
+            const questionKey = `${categoryId}-${globalQuestionNumber}`
+
+            let questionImageBase64 = ""
+            if (questionImages[question.number]) {
+              questionImageBase64 = await convertFileToBase64(questionImages[question.number])
+            }
+
+            const optionImagesBase64: Record<string, string> = {}
+            const optionImages = questionOptionImages[question.number]
+            if (optionImages) {
+              if (optionImages.a) optionImagesBase64.a = await convertFileToBase64(optionImages.a)
+              if (optionImages.b) optionImagesBase64.b = await convertFileToBase64(optionImages.b)
+              if (optionImages.c) optionImagesBase64.c = await convertFileToBase64(optionImages.c)
+              if (optionImages.d) optionImagesBase64.d = await convertFileToBase64(optionImages.d)
+            }
+
+            await set(refDB(db, `questions/${categoryId}/${questionKey}`), {
+              id: globalQuestionNumber,
+              question: question.text,
+              options: {
+                a: question.optionA,
+                b: question.optionB,
+                c: question.optionC,
+                ...(question.optionD && { d: question.optionD }),
+              },
+              correctAnswer: question.correctAnswer?.toUpperCase(),
+              reeks: seriesName,
+              ...(questionImageBase64 && { questionImage: questionImageBase64 }),
+              ...(question.needsImage && { needsImage: true }),
+              ...(question.imageDescription && { imageDescription: question.imageDescription }),
+              ...(question.optionsHaveImages && { optionsHaveImages: true }),
+              ...(Object.keys(optionImagesBase64).length > 0 && { optionImages: optionImagesBase64 }),
+            })
+          }
+        }
+        console.log("[v0] ✓ All series saved")
+      } else {
+        console.log("[v0] Saving to single series")
+
+        for (let i = 0; i < editableParsedQuestions.length; i++) {
+          const question = editableParsedQuestions[i]
+          const questionKey = `${categoryId}-${i + 1}`
+
+          let questionImageBase64 = ""
+          if (questionImages[question.number]) {
+            questionImageBase64 = await convertFileToBase64(questionImages[question.number])
+          }
+
+          const optionImagesBase64: Record<string, string> = {}
+          const optionImages = questionOptionImages[question.number]
+          if (optionImages) {
+            if (optionImages.a) optionImagesBase64.a = await convertFileToBase64(optionImages.a)
+            if (optionImages.b) optionImagesBase64.b = await convertFileToBase64(optionImages.b)
+            if (optionImages.c) optionImagesBase64.c = await convertFileToBase64(optionImages.c)
+            if (optionImages.d) optionImagesBase64.d = await convertFileToBase64(optionImages.d)
+          }
+
+          await set(refDB(db, `questions/${categoryId}/${questionKey}`), {
+            id: i + 1,
+            question: question.text,
+            options: {
+              a: question.optionA,
+              b: question.optionB,
+              c: question.optionC,
+              ...(question.optionD && { d: question.optionD }),
+            },
+            correctAnswer: question.correctAnswer?.toUpperCase(),
+            reeks: detectedSeriesName,
+            ...(questionImageBase64 && { questionImage: questionImageBase64 }),
+            ...(question.needsImage && { needsImage: true }),
+            ...(question.imageDescription && { imageDescription: question.imageDescription }),
+            ...(question.optionsHaveImages && { optionsHaveImages: true }),
+            ...(Object.keys(optionImagesBase64).length > 0 && { optionImages: optionImagesBase64 }),
+          })
+        }
+        console.log("[v0] ✓ Saved", totalQuestions, "questions")
+      }
+
+      await saveCategoryStatus(categoryId, "non-actief")
+
+      console.log("[v0] STEP 3: Reloading data...")
+      await loadAllCategories()
+      await loadQuestions(categoryId)
+      setSelectedCategory(categoryId)
+      setSelectedReeks("all")
+
+      console.log("[v0] ========================================")
+      console.log("[v0] ✓ CATEGORY CREATED SUCCESSFULLY")
+      console.log("[v0] ========================================")
+
+      toast({
+        title: "Succes",
+        description: `${editableParsedQuestions.length} vragen succesvol opgeslagen voor ${newCategoryName}${autoSplit === "split" && totalQuestions > questionsPerSeries ? ` (gesplitst in ${Math.ceil(totalQuestions / questionsPerSeries)} reeksen)` : ""}`,
+      })
+
+      // Close modal and refresh
+      setShowUploadModal(false)
+      setQuestionsText("")
+      setParsedQuestions([])
+      setEditableParsedQuestions([])
+      setNewCategoryName("")
+      setNewCategoryDescription("")
+      setNewCategoryIcon(null)
+      setNewCategoryIconPreview("")
+      setQuestionImages({})
+      setQuestionOptionImages({})
+      setCustomReeks("")
+      setUploadModalSelectedSeries("1")
+    } catch (error) {
+      console.error("[v0] ========================================")
+      console.error("[v0] WORKFLOW ERROR: Failed to create category")
+      console.error("[v0] ========================================")
+      console.error("[v0] Error details:", error)
+      alert("Er is een fout opgetreden bij het opslaan")
+    }
+  }
+
+  // Correctly placed handleExportEdits function
+  const handleExportEdits = () => {
+    const editsArray = Object.values(savedEdits)
+    const code = `// Question Edits Export\n// Generated: ${new Date().toISOString()}\n\nconst questionEdits = ${JSON.stringify(editsArray, null, 2)}\n\nexport default questionEdits`
+
+    const blob = new Blob([code], { type: "text/javascript" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `question-edits-${new Date().toISOString().split("T")[0]}.js`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  const handleMigrateTimestamps = async () => {
+    setIsMigrating(true)
+    try {
+      const result = await migrateTimestamps()
+      setMigrationResult(result)
+      console.log("[v0] Migration result:", sanitizeForLog(result)) // Log sanitized result
+    } catch (error) {
+      console.error("[v0] Migration error:", error)
+      setMigrationResult({
+        success: false,
+        message: "Fout tijdens migratie",
+        details: {},
+      })
     } finally {
       setIsMigrating(false)
     }
   }
 
-  if (loading) {
+  const handleMigrateStatic = async () => {
+    setIsStaticMigrating(true)
+    try {
+      const result = await migrateStaticQuestionsToFirebase()
+      setStaticMigrationResult(result)
+      console.log("[v0] Static migration result:", sanitizeForLog(result)) // Log sanitized result
+
+      // Reload questions after successful migration
+      if (result.success) {
+        await loadAllQuestions()
+      }
+    } catch (error) {
+      console.error("[v0] Static migration error:", error)
+      setStaticMigrationResult({
+        success: false,
+        errors: [error instanceof Error ? error.message : "Unknown error"],
+      })
+    } finally {
+      setIsStaticMigrating(false)
+    }
+  }
+
+  const handleStartEdit = (question: Question) => {
+    setEditingQuestionId(question.id)
+    setEditFormData({
+      question: question.question,
+      optionA: question.options.a,
+      optionB: question.options.b,
+      optionC: question.options.c,
+      optionD: question.options.d || "",
+      correct: question.correct as "a" | "b" | "c" | "d",
+      questionImage: question.image || question.questionImage || "", // Ensure to also check question.image for legacy data
+      optionAImage: question.optionImages?.a || "",
+      optionBImage: question.optionImages?.b || "",
+      optionCImage: question.optionImages?.c || "",
+      optionDImage: question.optionImages?.d || "",
+    })
+  }
+
+  const handleCancelEdit = () => {
+    setEditingQuestionId(null)
+    setEditFormData({
+      question: "",
+      optionA: "",
+      optionB: "",
+      optionC: "",
+      optionD: "",
+      correct: "a",
+      questionImage: "",
+      optionAImage: "",
+      optionBImage: "",
+      optionCImage: "",
+      optionDImage: "",
+    })
+  }
+
+  const handleSaveInlineEdit = async () => {
+    if (!editingQuestionId || !editFormData) return
+
+    console.log("[v0] Saving inline edit for question:", editingQuestionId)
+    console.log("[v0] Edit form data:", sanitizeForLog(editFormData))
+    console.log("[v0] Correct answer being saved:", editFormData.correct)
+
+    setIsSaving(true)
+    try {
+      const editKey = `${selectedCategory}-${editingQuestionId}`
+
+      const options: Record<string, string> = {}
+      if (editFormData.optionA?.trim()) options.a = editFormData.optionA.trim()
+      if (editFormData.optionB?.trim()) options.b = editFormData.optionB.trim()
+      if (editFormData.optionC?.trim()) options.c = editFormData.optionC.trim()
+      if (editFormData.optionD?.trim()) options.d = editFormData.optionD.trim()
+
+      // Build option images object, only include if has values
+      const optionImagesObj: Record<string, string> = {}
+      if (editFormData.optionAImage?.trim()) optionImagesObj.a = editFormData.optionAImage
+      if (editFormData.optionBImage?.trim()) optionImagesObj.b = editFormData.optionBImage
+      if (editFormData.optionCImage?.trim()) optionImagesObj.c = editFormData.optionCImage
+      if (editFormData.optionDImage?.trim()) optionImagesObj.d = editFormData.optionDImage
+
+      const edit: Partial<QuestionEdit> = {
+        question: editFormData.question?.trim() || "",
+        options,
+        ...(editFormData.correct && { correct: editFormData.correct }),
+        timestamp: new Date().toISOString(),
+        ...(editFormData.questionImage?.trim() && { questionImage: editFormData.questionImage }),
+        ...(Object.keys(optionImagesObj).length > 0 && { optionImages: optionImagesObj }),
+      }
+
+      console.log("[v0] Saving edit to Firebase:", editKey, sanitizeForLog(edit))
+
+      await set(refDB(db, `questionEdits/${editKey}`), edit)
+
+      // Update local state immediately
+      const newSavedEdits = { ...savedEdits }
+      newSavedEdits[editKey] = edit as QuestionEdit
+      setSavedEdits(newSavedEdits)
+
+      console.log("[v0] Question saved to Firebase:", editKey)
+      console.log("[v0] Updated savedEdits map size:", Object.keys(newSavedEdits).length)
+
+      await Promise.all([loadQuestions(), loadSavedEdits()])
+
+      setEditingQuestionId(null)
+      setIsSaving(false)
+
+      toast({
+        title: "Vraag opgeslagen",
+        description: `De wijziging aan vraag ${editingQuestionId} is opgeslagen.`,
+        duration: 3000,
+      })
+    } catch (error) {
+      console.error("Error saving inline edit:", error)
+      setIsSaving(false)
+      toast({
+        title: "Fout bij opslaan",
+        description: "Er is een fout opgetreden bij het opslaan van de vraag.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleDeleteQuestion = async (questionId: number) => {
+    if (!confirm(`Vraag ${questionId} permanent verwijderen?`)) return
+
+    try {
+      const questionKey = `${selectedCategory}-${questionId}`
+
+      // Check if question exists in Firebase
+      const fbQuestion = Object.values(firebaseQuestions).find((q) => q.id === questionId)
+
+      if (fbQuestion) {
+        // Delete Firebase question completely
+        await remove(refDB(db, `questions/${selectedCategory}/${questionKey}`))
+        console.log("[v0] Deleted Firebase question:", questionKey)
+      } else {
+        // Mark .ts question as deleted
+        await set(refDB(db, `deletedQuestions/${selectedCategory}/${questionKey}`), true)
+        console.log("[v0] Marked .ts question as deleted:", questionKey)
+      }
+
+      // Also delete any edits for this question
+      await remove(refDB(db, `questionEdits/${questionKey}`))
+
+      toast({
+        title: "Vraag verwijderd",
+        description: `Vraag ${questionId} is verwijderd.`,
+      })
+
+      // Reload data
+      await Promise.all([loadQuestions(), loadSavedEdits(), loadDeletedQuestions()]) // FIX: Use loadQuestions instead of loadFirebaseQuestions
+    } catch (error) {
+      console.error("[v0] Error deleting question:", error)
+      toast({
+        title: "Fout bij verwijderen",
+        description: "Er is een fout opgetreden bij het verwijderen van de vraag.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleSaveQuestionsFromOverview = async () => {
+    console.log("[v0] ========================================")
+    console.log("[v0] ADD TO EXISTING CATEGORY")
+    console.log("[v0] ========================================")
+    console.log("[v0] Category:", selectedCategory)
+    console.log("[v0] Questions to add:", editableParsedQuestions.length)
+
+    console.log("[v0] First 3 editable questions:")
+    editableParsedQuestions.slice(0, 3).forEach((q, i) => {
+      console.log(`  [${i}] number=${q.number}, text="${q.text?.substring(0, 50)}..."`)
+    })
+
+    if (editableParsedQuestions.length === 0) {
+      alert("Geen vragen gevonden om op te slaan")
+      return
+    }
+
+    const missingAnswers = editableParsedQuestions.filter((q) => !q.correctAnswer)
+
+    if (missingAnswers.length > 0) {
+      alert(
+        `${missingAnswers.length} vragen hebben nog geen correct antwoord geselecteerd. Selecteer deze eerst in de preview.`,
+      )
+      return
+    }
+
+    try {
+      console.log("[v0] Loading existing questions from Firebase...")
+      const existingQuestions = await loadQuestionsFromFirebase(selectedCategory)
+      const existingKeys = Object.keys(existingQuestions)
+
+      console.log("[v0] Existing questions:", existingKeys.length)
+
+      const existingIds = existingKeys
+        .map((key) => {
+          const parts = key.split("-")
+          const numPart = parts[parts.length - 1]
+          return Number.parseInt(numPart, 10)
+        })
+        .filter((id) => !isNaN(id))
+
+      const maxFbId = existingIds.length > 0 ? Math.max(...existingIds) : 0
+      const nextId = maxFbId + 1
+
+      console.log("[v0] Max ID:", maxFbId, "→ Next ID:", nextId)
+      console.log("[v0] Will assign IDs:", nextId, "to", nextId + editableParsedQuestions.length - 1)
+
+      const detectedSeriesName = uploadModalSelectedSeries === "new" ? customReeksInput : uploadModalSelectedSeries
+      const normalizedDetectedSeriesName = normalizeReeks(detectedSeriesName) // Normalize here
+
+      console.log("[v0] Series name:", detectedSeriesName)
+
+      const savedKeys: string[] = []
+
+      for (let i = 0; i < editableParsedQuestions.length; i++) {
+        const question = editableParsedQuestions[i]
+        const questionKey = `${selectedCategory}-${nextId + i}`
+
+        const keyExists = existingKeys.includes(questionKey)
+        if (keyExists) {
+          console.error("[v0] ❌ CONFLICT: Key", questionKey, "already exists!")
+          throw new Error(`Conflict detected: Question key ${questionKey} already exists`)
+        }
+
+        await set(refDB(db, `questions/${selectedCategory}/${questionKey}`), {
+          id: nextId + i,
+          question: question.text,
+          options: {
+            a: question.optionA,
+            b: question.optionB,
+            c: question.optionC,
+            ...(question.optionD && { d: question.optionD }),
+          },
+          correctAnswer: question.correctAnswer?.toUpperCase(),
+          reeks: normalizedDetectedSeriesName || "1",
+          ...(question.needsImage && { needsImage: true }),
+          ...(question.imageDescription && { imageDescription: question.imageDescription }),
+          ...(question.optionsHaveImages && { optionsHaveImages: true }),
+          ...(question.optionAImage && { optionAImageDescription: question.optionAImage }),
+          ...(question.optionBImage && { optionBImageDescription: question.optionBImage }),
+          ...(question.optionCImage && { optionCImageDescription: question.optionCImage }),
+          ...(question.optionDImage && { optionDImageDescription: question.optionDImage }),
+        })
+
+        savedKeys.push(questionKey)
+      }
+
+      console.log("[v0] ✓ Saved", savedKeys.length, "questions")
+
+      console.log("[v0] Verifying...")
+      const verifyQuestions = await loadQuestionsFromFirebase(selectedCategory)
+      const verifyKeys = Object.keys(verifyQuestions)
+      console.log("[v0] Total after save:", verifyKeys.length, "(was", existingKeys.length, ")")
+
+      // Questions by reeks
+      const reeksCount = new Map<string, number>()
+      verifyKeys.forEach((key) => {
+        const reeks = verifyQuestions[key].reeks
+        reeksCount.set(reeks, (reeksCount.get(reeks) || 0) + 1)
+      })
+      console.log("[v0] Questions by reeks:")
+      reeksCount.forEach((count, reeksName) => {
+        console.log(`  "${reeksName}": ${count} questions`)
+      })
+
+      console.log("[v0] ========================================")
+      console.log("[v0] ✓ QUESTIONS ADDED SUCCESSFULLY")
+      console.log("[v0] ========================================")
+
+      await saveCategoryStatus(selectedCategory, "non-actief")
+
+      toast({
+        title: "Succes",
+        description: `${editableParsedQuestions.length} vragen succesvol toegevoegd aan ${selectedCategory}`,
+      })
+
+      await loadQuestions(selectedCategory)
+      setShowUploadModal(false)
+      setEditableParsedQuestions([])
+      setShowPdfUploadInOverview(false)
+      setParsedQuestionsForOverview([])
+      setQuestionsText("")
+      setUploadModalSelectedSeries("all")
+      setCustomReeksInput("")
+    } catch (error) {
+      console.error("[v0] Error saving questions to Firebase:", error)
+      toast({
+        title: "Fout bij opslaan",
+        description: "Er is een fout opgetreden bij het opslaan van de vragen.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleDeleteCategory = async (categoryId: string) => {
+    const category = allCategories.find((c) => c.id === categoryId)
+    if (!category) return
+
+    console.log("[v0] Deleting category and all questions at path:", `questions/${categoryId}`)
+
+    if (
+      !confirm(
+        `Weet je zeker dat je de categorie "${category.name}" wilt verwijderen? Alle vragen en data worden ook verwijderd.`,
+      )
+    ) {
+      return
+    }
+
+    try {
+      await deleteCategory(categoryId)
+
+      // Update local state
+      setAllCategories((prev) => prev.filter((c) => c.id !== categoryId))
+
+      setFirebaseQuestions({})
+      console.log("[v0] Cleared local Firebase questions cache after delete")
+
+      toast({
+        title: "Categorie verwijderd",
+        description: `De categorie "${category.name}" is verwijderd.`,
+      })
+    } catch (error) {
+      console.error("[v0] Error deleting category:", error)
+      toast({
+        title: "Fout",
+        description: "Er is een fout opgetreden bij het verwijderen van de categorie.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleSaveCategoryName = async (categoryId: string) => {
+    if (!editingCategoryName.trim()) {
+      toast({
+        title: "Fout",
+        description: "Categorienaam mag niet leeg zijn.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      let iconBase64: string | undefined
+
+      if (editingCategoryIcon) {
+        const reader = new FileReader()
+        iconBase64 = await new Promise<string>((resolve) => {
+          reader.onloadend = () => resolve(reader.result as string)
+          reader.readAsDataURL(editingCategoryIcon)
+        })
+      } else if (editingCategoryIconPreview) {
+        // Keep existing icon if no new icon selected
+        iconBase64 = editingCategoryIconPreview
+      }
+
+      const category = allCategories.find((c) => c.id === categoryId)
+      if (!category) return
+
+      const newCategoryId = editingCategoryName
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9-]/g, "")
+
+      if (newCategoryId !== categoryId) {
+        console.log(`[v0] Category ID changed from ${categoryId} to ${newCategoryId}, updating questions...`)
+
+        // Move all questions to new category ID
+        const result = await renameCategoryId(categoryId, newCategoryId)
+
+        console.log(`[v0] Moved ${result.movedQuestionsCount} questions to new category ID`)
+      }
+
+      await saveCategory(newCategoryId, editingCategoryName, category.description, iconBase64)
+
+      toast({
+        title: "Categorie bijgewerkt",
+        description: "De categorie naam en icoon zijn succesvol bijgewerkt.",
+      })
+
+      setEditingCategoryId(null)
+      setEditingCategoryName("")
+      setEditingCategoryIcon(null)
+      setEditingCategoryIconPreview("")
+
+      if (newCategoryId !== categoryId && selectedCategory === categoryId) {
+        setSelectedCategory(newCategoryId)
+      }
+
+      // Refresh categories
+      await loadAllCategories() // Renamed to loadDynamicCategories
+    } catch (error) {
+      console.error("Error updating category:", error)
+      toast({
+        title: "Fout",
+        description: "Er is een fout opgetreden bij het bijwerken van de categorie.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const renderCategoryList = () => {
     return (
-      <main className="w-full min-h-screen bg-background flex items-center justify-center">
-        <p>Laden...</p>
-      </main>
+      <div className="space-y-4">
+        {allCategories.map((category) => (
+          <Card
+            key={category.id}
+            className="cursor-pointer hover:border-primary transition-colors"
+            onClick={() => {
+              setSelectedCategory(category.id)
+              setShowQuestionBrowser(true)
+            }}
+          >
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 flex-1">
+                  {category.icon && editingCategoryId !== category.id && (
+                    <div className="w-10 h-10 flex-shrink-0">
+                      <img
+                        src={category.icon || "/placeholder.svg"}
+                        alt={`${category.name} icon`}
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    {editingCategoryId === category.id ? (
+                      <div className="flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          <div className="w-10 h-10 flex-shrink-0 border rounded flex items-center justify-center bg-muted">
+                            {editingCategoryIconPreview || category.icon ? (
+                              <img
+                                src={editingCategoryIconPreview || category.icon}
+                                alt="Preview"
+                                className="w-full h-full object-contain"
+                              />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Icon</span>
+                            )}
+                          </div>
+                          <label className="cursor-pointer">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => handleEditCategoryIconUpload(e.target.files?.[0] || null)}
+                              className="hidden"
+                            />
+                            <Button type="button" variant="outline" size="sm" asChild>
+                              <span>Icoon Kiezen</span>
+                            </Button>
+                          </label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={editingCategoryName}
+                            onChange={(e) => setEditingCategoryName(e.target.value)}
+                            className="max-w-md"
+                            placeholder="Categorie naam"
+                          />
+                          <Button onClick={() => handleSaveCategoryName(category.id)} size="sm">
+                            Opslaan
+                          </Button>
+                          <Button
+                            onClick={() => {
+                              setEditingCategoryId(null)
+                              setEditingCategoryIcon(null)
+                              setEditingCategoryIconPreview("")
+                            }}
+                            variant="outline"
+                            size="sm"
+                          >
+                            Annuleren
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <CardTitle>{category.name}</CardTitle>
+                        <CardDescription>{category.description}</CardDescription>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setEditingCategoryId(category.id)
+                      setEditingCategoryName(category.name)
+                      setEditingCategoryIconPreview(category.icon || "")
+                    }}
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => handleDeleteCategory(category.id)}>
+                    <Trash2 className="w-4 h-4 text-destructive" />
+                  </Button>
+                  <Select
+                    value={category.status}
+                    onValueChange={(value: CategoryStatus) => handleStatusChange(category.id, value)}
+                  >
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="actief">
+                        <span className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                          Actief
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="binnenkort">
+                        <span className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                          Binnenkort
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="non-actief">
+                        <span className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-gray-400"></span>
+                          Niet beschikbaar {/* Changed from "Niet Actief" */}
+                        </span>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
     )
   }
 
-  if (showPasswordPrompt && !isAuthorized) {
-    return (
-      <main className="w-full min-h-screen bg-background flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle>Admin Toegang</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handlePasswordSubmit} className="space-y-4">
-              <div>
-                <label className="text-sm font-medium">Admin Wachtwoord</label>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Voer admin wachtwoord in"
-                  className="mt-1"
-                />
-              </div>
-              <div className="flex gap-2 flex-col">
-                <Button type="submit" className="flex-1">
-                  Toegang
-                </Button>
-                <Button type="button" variant="outline" onClick={() => router.push("/")} className="flex-1">
-                  Annuleren
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      </main>
+  const handleManualQuestionSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    console.log("[v0] handleManualQuestionSave called")
+
+    if (!formRef.current) {
+      console.log("[v0] No form ref found")
+      return
+    }
+
+    const formData = new FormData(formRef.current)
+
+    // Get basic fields
+    const question = (formData.get("question") as string)?.trim()
+    const optionA = (formData.get("optionA") as string)?.trim()
+    const optionB = (formData.get("optionB") as string)?.trim()
+    const optionC = (formData.get("optionC") as string)?.trim()
+    const optionD = (formData.get("optionD") as string)?.trim()
+
+    console.log("[v0] Form data:", sanitizeForLog({ question, optionA, optionB, optionC, optionD })) // Log sanitized data
+
+    // Validate required fields
+    if (!question || !optionA || !optionB || !optionC) {
+      toast({
+        title: "Fout",
+        description: "Vul alle verplichte velden in (vraag en opties A, B, C)",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Get reeks - use custom if "new" was selected, otherwise use selected value
+    let finalReeks = selectedReeks
+    if (selectedReeks === "new") {
+      // Use customReeksInput if selectedReeks is "new"
+      finalReeks = customReeksInput || (formData.get("customReeks") as string)
+    }
+
+    finalReeks = normalizeReeks(finalReeks) || "1"
+
+    console.log("[v0] Final reeks to save:", finalReeks)
+
+    // Build options array
+    const options = [optionA, optionB, optionC]
+    if (optionD) options.push(optionD)
+
+    // Get next question ID for this category
+    // Use loadQuestionsFromFirebase to get existing questions and determine next ID
+    const existingQuestions = await loadQuestionsFromFirebase(selectedCategory)
+    const maxId =
+      Object.keys(existingQuestions).length > 0
+        ? Math.max(...Object.values(existingQuestions).map((q: Question) => q.id || 0))
+        : 0
+    const questionIdToSave = maxId + 1
+
+    // Build question object - start clean
+    const newQuestion: any = {
+      id: questionIdToSave,
+      question,
+      options,
+      correctAnswer: selectedCorrectAnswer,
+      reeks: finalReeks,
+    }
+
+    // Add question image if exists
+    const questionImage = (formData.get("questionImage") as string)?.trim()
+    if (questionImage) {
+      newQuestion.questionImage = questionImage
+    } else {
+      // Explicitly set to empty string if not present to ensure the field exists
+      newQuestion.questionImage = ""
+    }
+
+    // Add option images as object (not array!) if they exist
+    const optionImages: Record<string, string> = {}
+    const optionLetters = ["a", "b", "c", "d"]
+
+    for (const letter of optionLetters) {
+      const imageData = (formData.get(`option${letter.toUpperCase()}Image`) as string)?.trim()
+      if (imageData) {
+        optionImages[letter] = imageData
+      }
+    }
+
+    // Only add optionImages if at least one image exists
+    if (Object.keys(optionImages).length > 0) {
+      newQuestion.optionImages = optionImages
+    }
+
+    console.log("[v0] Saving question to Firebase:", sanitizeForLog(newQuestion)) // Log sanitized question
+
+    try {
+      await saveQuestionToFirebase(selectedCategory, newQuestion)
+      toast({
+        title: "Vraag opgeslagen",
+        description: "De vraag is succesvol toegevoegd",
+      })
+
+      // Reset form and state
+      setShowManualQuestionForm(false)
+      formRef.current?.reset()
+      setSelectedCorrectAnswer("a")
+      setSelectedReeks("1") // Reset to default or initial value
+      setCustomReeksInput("") // Clear custom reeks input
+      setManualQuestionData({
+        question: "",
+        questionImage: "",
+        optionA: "",
+        optionAImage: "",
+        optionB: "",
+        optionBImage: "",
+        optionC: "",
+        optionCImage: "",
+        optionD: "",
+        optionDImage: "",
+        correctAnswer: "a",
+      })
+
+      // Reload questions to show new question
+      await loadAllQuestions()
+    } catch (error) {
+      console.error("[v0] Error saving question to Firebase:", error)
+      toast({
+        title: "Fout bij opslaan",
+        description: error instanceof Error ? error.message : "Er is een fout opgetreden",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>): Promise<string> => {
+    const file = event.target.files?.[0]
+    if (!file) return ""
+
+    // </CHANGE> Removed detailed base64 logging to clean up debug output
+    console.log(`[v0] Uploading image: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`)
+
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const result = e.target?.result
+        if (typeof result === "string") {
+          console.log(`[v0] Image converted successfully (${(result.length / 1024).toFixed(2)} KB)`)
+          resolve(result)
+        } else {
+          reject(new Error("Failed to read file as data URL"))
+        }
+      }
+      reader.onerror = (err) => reject(err)
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const handleUpdateReeks = async () => {
+    setIsReeksUpdating(true)
+    try {
+      const result = await updateExistingQuestionsWithReeks()
+      setReeksUpdateResult(result)
+      console.log("[v0] Reeks update result:", sanitizeForLog(result)) // Log sanitized result
+
+      // Reload questions after successful update
+      if (result.success) {
+        await loadAllQuestions()
+      }
+    } catch (error) {
+      console.error("[v0] Reeks update error:", error)
+      setReeksUpdateResult({
+        success: false,
+        errors: [error instanceof Error ? error.message : "Unknown error"],
+      })
+    } finally {
+      setIsReeksUpdating(false)
+    }
+  }
+
+  // ADD: Function to export all categories at once
+  const handleExportAllCategories = async () => {
+    try {
+      const categories = await getAllCategories()
+
+      if (categories.length === 0) {
+        alert("Geen categorieën gevonden om te exporteren.")
+        return
+      }
+
+      for (const category of categories) {
+        const categoryId = category.id
+        const allQuestions = await getAllQuestions(categoryId)
+
+        // Group questions by reeks
+        const questionsByReeks: Record<string, any[]> = {}
+
+        Object.entries(allQuestions).forEach(([questionId, questionData]: [string, any]) => {
+          const reeks = questionData.reeks || "1"
+          if (!questionsByReeks[reeks]) {
+            questionsByReeks[reeks] = []
+          }
+          questionsByReeks[reeks].push({
+            id: questionId,
+            ...questionData,
+          })
+        })
+
+        // Generate TypeScript code
+        let code = `// Backup for ${category.name} - Generated: ${new Date().toISOString()}\n`
+        code += `import type { Question, QuestionSet } from "./radar-data"\n\n`
+
+        // Helper functions
+        code += `const q = (id: string, question: string, options: Record<string, string>, correct: string): Question => ({\n`
+        code += `  id,\n  question,\n  options,\n  correct,\n})\n\n`
+
+        code += `const qWithImage = (id: string, question: string, options: Record<string, string>, correct: string, image: string): Question => ({\n`
+        code += `  id,\n  question,\n  options,\n  correct,\n  hasImage: true,\n  image,\n})\n\n`
+
+        // Question sets
+        code += `export const ${categoryId}QuestionSets: QuestionSet[] = [\n`
+
+        Object.keys(questionsByReeks)
+          .sort()
+          .forEach((reeksName) => {
+            const questions = questionsByReeks[reeksName]
+            code += `  {\n`
+            code += `    id: "${reeksName}",\n`
+            code += `    name: "${reeksName}",\n`
+            code += `    description: "${category.name} - ${reeksName}",\n`
+            code += `    questions: [\n`
+
+            questions.forEach((q) => {
+              const hasImage = q.questionImage || q.image
+              const options = JSON.stringify(q.options || {})
+              const correct = JSON.stringify(q.correctAnswer || q.correct || "a")
+
+              if (hasImage) {
+                const imageData = q.questionImage || q.image
+                code += `      qWithImage(${JSON.stringify(q.id)}, ${JSON.stringify(q.question)}, ${options}, ${correct}, ${JSON.stringify(imageData)}),\n`
+              } else {
+                code += `      q(${JSON.stringify(q.id)}, ${JSON.stringify(q.question)}, ${options}, ${correct}),\n`
+              }
+            })
+
+            code += `    ],\n`
+            code += `  },\n`
+          })
+
+        code += `]\n\n`
+        code += `export const questionSets = ${categoryId}QuestionSets\n`
+
+        // Download file
+        const blob = new Blob([code], { type: "text/typescript" })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `${categoryId}-data-backup-${new Date().toISOString().split("T")[0]}.ts`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+
+        // Small delay between downloads
+        await new Promise((resolve) => setTimeout(resolve, 300))
+      }
+
+      alert(`Alle ${categories.length} categorieën succesvol geëxporteerd!`)
+    } catch (error) {
+      console.error("Error exporting all categories:", error)
+      alert("Er is een fout opgetreden bij het exporteren van alle categorieën.")
+    }
+  }
+
+  const handleExportCategoryBackup = async () => {
+    if (!selectedCategory) return
+
+    try {
+      const allQuestions = await getAllQuestions(selectedCategory)
+
+      // Group questions by reeks
+      const questionsByReeks: Record<string, any[]> = {}
+
+      Object.entries(allQuestions).forEach(([questionId, questionData]: [string, any]) => {
+        const reeks = questionData.reeks || "1"
+        if (!questionsByReeks[reeks]) {
+          questionsByReeks[reeks] = []
+        }
+        questionsByReeks[reeks].push({
+          id: questionId,
+          ...questionData,
+        })
+      })
+
+      // Generate TypeScript code
+      let code = `// Backup for ${selectedCategory} - Generated: ${new Date().toISOString()}\n`
+      code += `import type { Question, QuestionSet } from "./radar-data"\n\n`
+
+      // Helper functions
+      code += `const q = (id: string, question: string, options: Record<string, string>, correct: string): Question => ({\n`
+      code += `  id,\n  question,\n  options,\n  correct,\n})\n\n`
+
+      code += `const qWithImage = (id: string, question: string, options: Record<string, string>, correct: string, image: string): Question => ({\n`
+      code += `  id,\n  question,\n  options,\n  correct,\n  hasImage: true,\n  image,\n})\n\n`
+
+      // Question sets
+      code += `export const ${selectedCategory}QuestionSets: QuestionSet[] = [\n`
+
+      Object.keys(questionsByReeks)
+        .sort()
+        .forEach((reeksName) => {
+          const questions = questionsByReeks[reeksName]
+          code += `  {\n`
+          code += `    id: "${reeksName}",\n`
+          code += `    name: "${reeksName}",\n`
+          code += `    description: "${selectedCategory} - ${reeksName}",\n`
+          code += `    questions: [\n`
+
+          questions.forEach((q) => {
+            const hasImage = q.questionImage || q.image
+            const options = JSON.stringify(q.options || {})
+            const correct = JSON.stringify(q.correctAnswer || q.correct || "a")
+
+            if (hasImage) {
+              const imageData = q.questionImage || q.image
+              code += `      qWithImage(${JSON.stringify(q.id)}, ${JSON.stringify(q.question)}, ${options}, ${correct}, ${JSON.stringify(imageData)}),\n`
+            } else {
+              code += `      q(${JSON.stringify(q.id)}, ${JSON.stringify(q.question)}, ${options}, ${correct}),\n`
+            }
+          })
+
+          code += `    ],\n`
+          code += `  },\n`
+        })
+
+      code += `]\n\n`
+      code += `export const questionSets = ${selectedCategory}QuestionSets\n`
+
+      // Download file
+      const blob = new Blob([code], { type: "text/typescript" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${selectedCategory}-data-backup-${new Date().toISOString().split("T")[0]}.ts`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+
+      alert(`Backup succesvol geëxporteerd voor ${selectedCategory}!`)
+    } catch (error) {
+      console.error("Error exporting backup:", error)
+      alert("Er is een fout opgetreden bij het exporteren van de backup.")
+    }
+  }
+
+  // // ADD: Function to export a specific category as a TS file
+  // const handleExportCategory = async (categoryId: string) => {
+  //   try {
+  //     const category = allCategories.find((c) => c.id === categoryId);
+  //     if (!category) return;
+
+  //     const allQuestions = await getAllQuestions(categoryId);
+
+  //     // Group questions by reeks
+  //     const questionsByReeks: Record<string, any[]> = {};
+
+  //     Object.entries(allQuestions).forEach(([questionId, questionData]: [string, any]) => {
+  //       const reeks = questionData.reeks || "1";
+  //       if (!questionsByReeks[reeks]) {
+  //         questionsByReeks[reeks] = [];
+  //       }
+  //       questionsByReeks[reeks].push({
+  //         id: questionId,
+  //         ...questionData,
+  //       });
+  //     });
+
+  //     // Generate TypeScript code
+  //     let code = `// Backup for ${category.name} - Generated: ${new Date().toISOString()}\n`;
+  //     code += `import type { Question, QuestionSet } from "./radar-data"\n\n`;
+
+  //     // Helper functions
+  //     code += `const q = (id: string, question: string, options: Record<string, string>, correct: string): Question => ({\n`;
+  //     code += `  id,\n  question,\n  options,\n  correct,\n})\n\n`;
+
+  //     code += `const qWithImage = (id: string, question: string, options: Record<string, string>, correct: string, image: string): Question => ({\n`;
+  //     code += `  id,\n  question,\n  options,\n  correct,\n  hasImage: true,\n  image,\n})\n\n`;
+
+  //     // Question sets
+  //     code += `export const ${categoryId}QuestionSets: QuestionSet[] = [\n`;
+
+  //     Object.keys(questionsByReeks)
+  //       .sort()
+  //       .forEach((reeksName) => {
+  //         const questions = questionsByReeks[reeksName];
+  //         code += `  {\n`;
+  //         code += `    id: "${reeksName}",\n`;
+  //         code += `    name: "${reeksName}",\n`;
+  //         code += `    description: "${category.name} - ${reeksName}",\n`;
+  //         code += `    questions: [\n`;
+
+  //         questions.forEach((q) => {
+  //           const hasImage = q.questionImage || q.image;
+  //           const options = JSON.stringify(q.options || {});
+  //           const correct = JSON.stringify(q.correctAnswer || q.correct || "a");
+
+  //           if (hasImage) {
+  //             const imageData = q.questionImage || q.image;
+  //             code += `      qWithImage(${JSON.stringify(q.id)}, ${JSON.stringify(q.question)}, ${options}, ${correct}, ${JSON.stringify(imageData)}),\n`;
+  //           } else {
+  //             code += `      q(${JSON.stringify(q.id)}, ${JSON.stringify(q.question)}, ${options}, ${correct}),\n`;
+  //           }
+  //         });
+
+  //         code += `    ],\n`;
+  //         code += `  },\n`;
+  //       });
+
+  //     code += `]\n\n`;
+  //     code += `export const questionSets = ${categoryId}QuestionSets\n`;
+
+  //     // Download file
+  //     const blob = new Blob([code], { type: "text/typescript" });
+  //     const url = URL.createObjectURL(blob);
+  //     const a = document.createElement("a");
+  //     a.href = url;
+  //     a.download = `${categoryId}-data-backup-${new Date().toISOString().split("T")[0]}.ts`;
+  //     document.body.appendChild(a);
+  //     a.click();
+  //     document.body.removeChild(a);
+  //     URL.revokeObjectURL(url);
+
+  //     alert(`Backup succesvol geëxporteerd voor ${category.name}!`);
+  //   } catch (error) {
+  //     console.error("Error exporting category:", error);
+  //     alert("Er is een fout opgetreden bij het exporteren van de categorie.");
+  //   }
+  // };
+
+  // Removed duplicate handleOptionImageUpload function (already handled above)
+
+  const handleRenameSeries = async () => {
+    if (!selectedCategory || !renameSeriesOldName || !renameSeriesNewName) {
+      toast({
+        title: "Fout",
+        description: "Vul beide velden in om de reeks naam te wijzigen",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (renameSeriesOldName === renameSeriesNewName) {
+      toast({
+        title: "Geen wijziging",
+        description: "De nieuwe naam is hetzelfde als de oude naam",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsRenamingSeries(true)
+
+    try {
+      const selectedOption = availableReeksOptionsWithOriginal.find((opt) => opt.value === renameSeriesOldName)
+      const originalReeksName = selectedOption?.original || renameSeriesOldName
+
+      console.log("[v0] Renaming series - normalized:", renameSeriesOldName, "original:", originalReeksName)
+
+      const result = await renameSeriesInCategory(selectedCategory, originalReeksName, renameSeriesNewName)
+
+      if (result.success && result.updatedCount > 0) {
+        toast({
+          title: "Reeks hernoemd",
+          description: `${result.updatedCount} vragen zijn bijgewerkt met de nieuwe reeks naam "${renameSeriesNewName}"`,
+        })
+
+        setSelectedQuestionSet("all")
+        setSelectedReeks("all")
+
+        await loadQuestions()
+
+        setShowRenameSeriesDialog(false)
+        setRenameSeriesOldName("")
+        setRenameSeriesNewName("")
+      } else {
+        toast({
+          title: "Geen vragen gevonden",
+          description: `Geen vragen gevonden met reeks naam "${originalReeksName}"`,
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("[v0] Error renaming series:", error)
+      toast({
+        title: "Fout",
+        description: "Er is een fout opgetreden bij het hernoemen van de reeks",
+        variant: "destructive",
+      })
+    } finally {
+      setIsRenamingSeries(false)
+    }
+  }
+
+  const handleDeleteSeries = async () => {
+    if (!selectedCategory || !deleteSeriesName) {
+      toast({
+        title: "Fout",
+        description: "Selecteer een reeks om te verwijderen",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsDeletingSeries(true)
+
+    try {
+      const selectedOption = availableReeksOptionsWithOriginal.find((opt) => opt.value === deleteSeriesName)
+      const originalReeksName = selectedOption?.original || deleteSeriesName
+
+      console.log("[v0] Deleting series - normalized:", deleteSeriesName, "original:", originalReeksName)
+
+      const result = await deleteSeriesFromCategory(selectedCategory, originalReeksName)
+
+      if (result.success && result.deletedCount > 0) {
+        toast({
+          title: "Reeks verwijderd",
+          description: `${result.deletedCount} vragen zijn verwijderd uit de reeks "${originalReeksName}"`,
+        })
+
+        setSelectedQuestionSet("all")
+        setSelectedReeks("all")
+
+        await loadQuestions()
+
+        setShowDeleteSeriesDialog(false)
+        setDeleteSeriesName("")
+      } else {
+        toast({
+          title: "Geen vragen gevonden",
+          description: `Geen vragen gevonden met reeks naam "${originalReeksName}"`,
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("[v0] Error deleting series:", error)
+      toast({
+        title: "Fout",
+        description: "Er is een fout opgetreden bij het verwijderen van de reeks",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDeletingSeries(false)
+    }
+  }
+
+  const handleSmartSave = async () => {
+    // Check if the category already exists
+    const categoryExists = allCategories.some(
+      (cat) => cat.id === newCategoryName || cat.id === newCategoryName.toLowerCase().replace(/\s+/g, "-"),
     )
+
+    if (isAddingToExistingCategory || categoryExists) {
+      console.log("[v0] Routing to: ADD TO EXISTING CATEGORY workflow")
+      await handleSaveQuestionsFromOverview()
+    } else {
+      console.log("[v0] Routing to: NEW CATEGORY workflow")
+      await handleSaveNewCategoryWithQuestions()
+    }
   }
 
   return (
-    <main className="w-full min-h-screen bg-background p-4">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
+    <div className="min-h-screen bg-background">
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-3xl font-bold text-foreground">Admin Panel</h1>
           <div className="flex items-center gap-4">
+            {email && <span className="text-sm text-muted-foreground">{email}</span>} {/* Display user email */}
+            {isLoading && <span className="text-sm text-muted-foreground">Laden...</span>}
             <Link href="/">
-              <Button variant="outline" size="sm">
-                <ChevronLeft className="w-4 h-4 mr-2" />
-                Terug
-              </Button>
+              <Button variant="outline">Terug naar Home</Button>
             </Link>
-            <h1 className="text-2xl font-bold">Vragen Beheer</h1>
-            {editedQuestions.size > 0 && (
-              <span className="bg-orange-500 text-white px-3 py-1 rounded-full text-sm font-semibold">
-                {editedQuestions.size} aangepast
-              </span>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button onClick={handleCheckMigrationStatus} variant="outline">
-              <Database className="w-4 h-4 mr-2" />
-              Check Database Status
-            </Button>
-            <Button onClick={exportCode} variant="default" disabled={editedQuestions.size === 0}>
-              <Download className="w-4 h-4 mr-2" />
-              Exporteer Code
-            </Button>
           </div>
         </div>
 
-        <Card className="mb-6">
+        <Card className="mb-8">
           <CardHeader>
-            <CardTitle>Filters</CardTitle>
+            <CardTitle>Categorie Beheer</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex gap-4 flex-wrap">
-              <Button variant={selectedSet === "all" ? "default" : "outline"} onClick={() => setSelectedSet("all")}>
-                Alle Vragen ({allQuestions.length})
-              </Button>
-              {questionSets.map((set) => (
-                <Button
-                  key={set.id}
-                  variant={selectedSet === set.name ? "default" : "outline"}
-                  onClick={() => setSelectedSet(set.name)}
-                >
-                  {set.name} ({set.questions.length})
-                </Button>
-              ))}
-            </div>
+          <CardContent>
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-semibold mb-4">Beschikbare Categorieën:</h3>
+                {renderCategoryList()}
+              </div>
 
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Zoek op vraagnummer of tekst..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
+              <div className="pt-4 border-t">
+                {/* Button text simplified to only "Nieuwe Categorie" */}
+                <Button onClick={handleTextUpload} className="w-full gap-2">
+                  <Plus className="h-4 w-4" />
+                  Nieuwe Categorie
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
 
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">{filteredQuestions.length} vragen gevonden</p>
+        <Card>
+          <CardHeader>
+            <CardTitle>Database Beheer</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {/* CHANGE: Add full backup button at the top */}
+            <Button onClick={handleExportAllCategories} className="w-full gap-2" variant="default">
+              <Download className="h-4 w-4" />
+              Exporteer Volledige Backup (Alle Categorieën)
+            </Button>
 
-          {filteredQuestions.map((question) => (
-            <Card
-              key={question.id}
-              className={`hover:border-primary/50 transition-colors ${editedQuestions.has(question.id) ? "border-orange-500" : ""}`}
-            >
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 space-y-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-sm font-semibold bg-muted px-2 py-1 rounded">#{question.id}</span>
-                      <span className="text-sm text-muted-foreground">{question.setName}</span>
-                      {editedQuestions.has(question.id) && (
-                        <span className="text-xs bg-orange-500 text-white px-2 py-1 rounded">Aangepast</span>
-                      )}
-                      {question.hasImage && (
-                        <span className="text-xs bg-blue-500/10 text-blue-600 px-2 py-1 rounded">Met afbeelding</span>
-                      )}
-                      {question.optionImages && (
-                        <span className="text-xs bg-purple-500/10 text-purple-600 px-2 py-1 rounded">
-                          Afbeelding antwoorden
-                        </span>
-                      )}
+            <Button onClick={() => setShowStaticMigration(true)} className="w-full gap-2" variant="default">
+              <Upload className="h-4 w-4" />
+              Migreer Statische Vragen
+            </Button>
+
+            <Button onClick={() => setShowReeksUpdate(true)} className="w-full gap-2" variant="default">
+              <RefreshCw className="h-4 w-4" />
+              Update Reeksen op Bestaande Vragen
+            </Button>
+
+            <Button onClick={() => setShowTimestampMigration(true)} className="w-full gap-2" variant="outline">
+              <RefreshCw className="h-4 w-4" />
+              Converteer Timestamps
+            </Button>
+          </CardContent>
+        </Card>
+
+        {showTimestampMigration && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <Card className="w-full max-w-2xl">
+              <CardHeader>
+                <CardTitle>Timestamp Migratie</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {!migrationResult ? (
+                  <>
+                    <p className="text-sm text-muted-foreground">
+                      Deze functie converteert alle oude timestamps (milliseconden) om naar leesbare ISO strings.
+                    </p>
+                    <p className="text-sm text-muted-foreground">Dit wordt toegepast op:</p>
+                    <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
+                      <li>User createdAt en lastActive</li>
+                      <li>Quiz results timestamps</li>
+                      <li>Quiz progress timestamps</li>
+                    </ul>
+                    <div className="flex gap-2">
+                      <Button onClick={handleMigrateTimestamps} disabled={isMigrating}>
+                        {isMigrating ? "Bezig met converteren..." : "Start Migratie"}
+                      </Button>
+                      <Button variant="outline" onClick={() => setShowTimestampMigration(false)}>
+                        Annuleren
+                      </Button>
                     </div>
-
-                    <p className="text-base">{question.question}</p>
-
-                    <div className="grid gap-2 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className={`font-semibold ${question.correct === "a" ? "text-green-600" : ""}`}>A:</span>
-                        <span>{question.options.a || "(afbeelding)"}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`font-semibold ${question.correct === "b" ? "text-green-600" : ""}`}>B:</span>
-                        <span>{question.options.b || "(afbeelding)"}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`font-semibold ${question.correct === "c" ? "text-green-600" : ""}`}>C:</span>
-                        <span>{question.options.c || "(afbeelding)"}</span>
-                      </div>
+                  </>
+                ) : (
+                  <>
+                    <div className={`p-4 rounded-lg ${migrationResult.success ? "bg-green-500/10" : "bg-red-500/10"}`}>
+                      <p className={`font-semibold ${migrationResult.success ? "text-green-600" : "text-red-600"}`}>
+                        {migrationResult.message}
+                      </p>
                     </div>
+                    {migrationResult.success && (
+                      <div className="space-y-2">
+                        <h3 className="font-semibold text-sm">Details per gebruiker:</h3>
+                        <div className="bg-muted p-3 rounded-lg text-xs font-mono max-h-64 overflow-y-auto">
+                          {Object.entries(migrationResult.details).map(([username, details]: [string, any]) => (
+                            <div key={username} className="mb-2">
+                              <strong>{username}:</strong>
+                              <ul className="ml-4">
+                                {details.createdAt && <li>✓ createdAt omgezet</li>}
+                                {details.lastActive && <li>✓ lastActive omgezet</li>}
+                                {details.quizResults > 0 && <li>✓ {details.quizResults} quiz results omgezet</li>}
+                                {details.quizProgress > 0 && <li>✓ {details.quizProgress} quiz progress omgezet</li>}
+                              </ul>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <Button
+                      onClick={() => {
+                        setShowTimestampMigration(false)
+                        setMigrationResult(null)
+                      }}
+                      className="w-full"
+                    >
+                      Sluiten
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
-                    <div className="text-sm">
-                      <span className="font-semibold">Correct antwoord: </span>
-                      <span className="text-green-600 font-bold uppercase">{question.correct}</span>
+        <Dialog open={showUploadModal} onOpenChange={setShowUploadModal}>
+          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+            <DialogHeader>
+              {/* Updated DialogTitle to dynamically show newCategoryName */}
+              <DialogTitle>
+                {editableParsedQuestions.length > 0
+                  ? `Vragen Nakijken - ${newCategoryName || selectedCategory}`
+                  : `Vragen Toevoegen`}
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="flex-1 overflow-auto">
+              {editableParsedQuestions.length === 0 ? (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="categoryName">Categorie Naam</Label>
+                    <Input
+                      id="categoryName"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="Bijv: Radar, Matroos, Schipper"
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="categoryDescription">Categorie Beschrijving (optioneel)</Label>
+                    <Input
+                      id="categoryDescription"
+                      placeholder={`bijv: Oefenvragen voor ${newCategoryName || "deze categorie"}`}
+                      value={newCategoryDescription}
+                      onChange={(e) => setNewCategoryDescription(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="categoryIcon">Categorie Icoon (optioneel)</Label>
+                    <div className="flex items-center gap-4">
+                      <input
+                        id="categoryIcon"
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleCategoryIconUpload(e.target.files?.[0] || null)}
+                        className="text-sm"
+                      />
+                      {newCategoryIconPreview && (
+                        <div className="w-12 h-12 border rounded flex items-center justify-center bg-muted">
+                          <img
+                            src={newCategoryIconPreview || "/placeholder.svg"}
+                            alt="Icon preview"
+                            className="max-w-full max-h-full object-contain"
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <Button variant="outline" size="sm" onClick={() => setEditingId(question.id)}>
-                    Bewerken
-                  </Button>
+                  <div className="space-y-2">
+                    <Label htmlFor="questionsInput">Vragen Invoeren</Label>
+                    <Textarea
+                      id="questionsInput"
+                      value={questionsText}
+                      onChange={(e) => setQuestionsText(e.target.value)}
+                      placeholder="Plak hier de vragen in het volgende formaat:&#10;&#10;1. Vraag tekst?&#10;a) Optie A&#10;b) Optie B&#10;c) Optie C&#10;d) Optie D&#10;&#10;2. Volgende vraag?"
+                      className="min-h-[200px] font-mono text-sm"
+                    />
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button onClick={handleParseText} className="flex-1">
+                      Vragen Verwerken
+                    </Button>
+                    <label htmlFor="pdf-upload">
+                      <Button type="button" variant="outline" className="cursor-pointer bg-transparent" asChild>
+                        <span>
+                          <FileText className="h-4 w-4 mr-2" />
+                          Of upload PDF
+                        </span>
+                      </Button>
+                    </label>
+                    <input id="pdf-upload" type="file" accept=".pdf" onChange={handlePdfUpload} className="hidden" />
+                  </div>
+
+                  {isProcessingPdf && (
+                    <div className="flex items-center justify-center p-8">
+                      <div className="text-center space-y-2">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto" />
+                        <p className="text-sm text-muted-foreground">PDF verwerken...</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-
-      {editingQuestion && (
-        <QuestionEditor question={editingQuestion} onClose={() => setEditingId(null)} onSave={handleSaveQuestion} />
-      )}
-
-      {showExportModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <Card className="w-full max-w-4xl max-h-[80vh] flex flex-col">
-            <CardHeader>
-              <CardTitle>Exporteer Aangepaste Vragen</CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 overflow-y-auto space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Kopieer de code hieronder en plak deze in lib/questions-data.ts om de wijzigingen permanent te maken.
-              </p>
-
-              <div className="relative">
-                <pre className="bg-muted p-4 rounded-lg overflow-x-auto text-xs font-mono">{exportedCode}</pre>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="absolute top-2 right-2 bg-transparent"
-                  onClick={() => {
-                    navigator.clipboard.writeText(exportedCode)
-                    alert("Code gekopieerd naar clipboard!")
-                  }}
-                >
-                  Kopieer
-                </Button>
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="font-semibold text-sm">Instructies:</h3>
-                <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
-                  <li>Kopieer de code hierboven</li>
-                  <li>Open het bestand lib/questions-data.ts</li>
-                  <li>Zoek de vragen op nummer en vervang ze</li>
-                  <li>Sla het bestand op</li>
-                </ol>
-              </div>
-            </CardContent>
-            <div className="border-t p-4">
-              <Button onClick={() => setShowExportModal(false)} className="w-full">
-                Sluiten
-              </Button>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {showMigrationModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <Card className="w-full max-w-2xl max-h-[80vh] flex flex-col">
-            <CardHeader>
-              <CardTitle>Database Status</CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 overflow-y-auto space-y-4">
-              {migrationStatus && (
+              ) : (
                 <>
-                  {!migrationStatus.hasOldProgress &&
-                  !migrationStatus.hasOldResults &&
-                  !migrationStatus.hasOldIncorrect ? (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                      <h3 className="font-semibold text-green-900 mb-2">Database is schoon!</h3>
-                      <p className="text-sm text-green-800 mb-3">
-                        Er zijn geen oude top-level nodes meer. Alle data staat in de nieuwe structuur onder
-                        users/[username]/.
+                  <div className="space-y-4 mb-4">
+                    <div className="p-3 bg-muted rounded-lg">
+                      <p className="text-sm font-medium">
+                        Categorie: <span className="text-primary">{newCategoryName || "Geen naam ingevuld"}</span>
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Beschrijving: {newCategoryDescription || "Geen beschrijving"}
                       </p>
                     </div>
-                  ) : (
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                      <h3 className="font-semibold text-yellow-900 mb-2">Oude data gevonden</h3>
-                      <p className="text-sm text-yellow-800 mb-3">
-                        Er zijn nog oude top-level nodes in je database die gemigreerd moeten worden:
-                      </p>
-                      <ul className="list-disc list-inside space-y-1 text-sm text-yellow-800 ml-2">
-                        {migrationStatus.hasOldProgress && <li>quizProgress/ (oude progress data)</li>}
-                        {migrationStatus.hasOldResults && <li>quizResults/ (oude results data)</li>}
-                        {migrationStatus.hasOldIncorrect && <li>incorrectQuestions/ (oude foute vragen)</li>}
-                      </ul>
-                    </div>
-                  )}
+                  </div>
 
-                  {oldDataDetails && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <h3 className="font-semibold text-blue-900 mb-2">Details van oude data:</h3>
-                      <div className="text-sm text-blue-800 space-y-2">
-                        {Object.keys(oldDataDetails.oldProgress).length > 0 && (
-                          <div>
-                            <strong>quizProgress:</strong> {Object.keys(oldDataDetails.oldProgress).length} gebruiker(s)
-                            met progress
-                          </div>
-                        )}
-                        {Object.keys(oldDataDetails.oldResults).length > 0 && (
-                          <div>
-                            <strong>quizResults:</strong> {Object.keys(oldDataDetails.oldResults).length} gebruiker(s)
-                            met results
-                          </div>
-                        )}
-                        {Object.keys(oldDataDetails.oldIncorrect).length > 0 && (
-                          <div>
-                            <strong>incorrectQuestions:</strong> {Object.keys(oldDataDetails.oldIncorrect).length}{" "}
-                            gebruiker(s) met foute vragen
-                          </div>
-                        )}
+                  <div className="space-y-2">
+                    <Label>Vragen Organisatie</Label>
+                    <RadioGroup
+                      value={autoSplit} // Use autoSplit state here
+                      onValueChange={(v) => setAutoSplit(v as "single" | "split")} // Update autoSplit state
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="single" id="single" />
+                        <Label htmlFor="single" className="font-normal cursor-pointer">
+                          Alle vragen in één reeks
+                        </Label>
                       </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="split" id="split" />
+                        <Label htmlFor="split" className="font-normal cursor-pointer">
+                          Automatisch splitsen in groepen van 50 vragen
+                        </Label>
+                      </div>
+                    </RadioGroup>
+                    {autoSplit === "split" && editableParsedQuestions.length > 50 && (
+                      <p className="text-sm text-muted-foreground">
+                        {editableParsedQuestions.length} vragen worden verdeeld over{" "}
+                        {Math.ceil(editableParsedQuestions.length / 50)} reeksen
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="series-select">Reeks Naam</Label>
+                    <Select value={uploadModalSelectedSeries} onValueChange={handleSeriesChange}>
+                      <SelectTrigger id="series-select">
+                        <SelectValue placeholder="Selecteer of maak een reeks" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableReeksOptions.length > 0 &&
+                          availableReeksOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        <SelectItem value="new">+ Nieuwe Reeks Aanmaken</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {uploadModalSelectedSeries === "new" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="custom-reeks">Nieuwe Reeks Naam</Label>
+                      <Input
+                        id="custom-reeks"
+                        value={customReeksInput} // Use customReeksInput for input value
+                        onChange={handleCustomReeksChange} // Use memoized handler
+                        placeholder="Bijv: Hoofdstuk 2 - Navigatie"
+                      />
                     </div>
                   )}
 
-                  {(migrationStatus.hasOldProgress ||
-                    migrationStatus.hasOldResults ||
-                    migrationStatus.hasOldIncorrect) && (
-                    <>
-                      <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                        <h3 className="font-semibold text-orange-900 mb-2">Stap 1: Migreer Data</h3>
-                        <p className="text-sm text-orange-800 mb-3">
-                          Kopieer eerst alle oude data naar de nieuwe structuur onder users/[username]/. De oude nodes
-                          blijven staan als backup.
+                  <h3 className="font-semibold mb-4">Preview: {editableParsedQuestions.length} vragen gevonden</h3>
+
+                  {editableParsedQuestions.some((q) => !q.correctAnswer) && (
+                    <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+                      ⚠️ Sommige vragen hebben geen correct antwoord. Selecteer deze hieronder.
+                    </div>
+                  )}
+                  {editableParsedQuestions.some((q) => q.needsImage || q.optionsHaveImages) && (
+                    <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+                      📷 {editableParsedQuestions.filter((q) => q.needsImage || q.optionsHaveImages).length} vragen
+                      hebben afbeeldingen nodig. Upload deze hieronder.
+                    </div>
+                  )}
+                  <div className="space-y-4 max-h-96 overflow-y-auto">
+                    {editableParsedQuestions.map((q) => (
+                      <div
+                        key={q.number}
+                        className={`border rounded-lg p-4 transition-all ${
+                          q.needsImage || q.optionsHaveImages ? "border-red-300 bg-red-50" : ""
+                        }`}
+                      >
+                        <p className="font-medium mb-3">
+                          {q.number}. {q.text}
                         </p>
-                        <Button onClick={handleMigrateData} disabled={isMigrating} className="w-full">
-                          {isMigrating ? "Bezig met migreren..." : "Migreer oude data naar nieuwe structuur"}
-                        </Button>
-                      </div>
 
-                      {migrationReport && (
-                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                          <h3 className="font-semibold text-green-900 mb-2">Migratie Rapport</h3>
-                          <div className="text-sm text-green-800 space-y-2">
-                            <div>
-                              <strong>Gebruikers gemigreerd:</strong> {migrationReport.usersFound.join(", ")}
+                        {q.needsImage && (
+                          <div className="mb-4 p-3 bg-white border border-red-200 rounded">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-xs font-medium text-red-700">📷 Afbeelding vereist:</span>
+                              <span className="text-xs text-gray-600">{q.imageDescription}</span>
                             </div>
-                            <div>
-                              <strong>Progress items:</strong>{" "}
-                              {Object.values(migrationReport.progressMigrated).reduce((a, b) => a + b, 0)}
-                            </div>
-                            <div>
-                              <strong>Results items:</strong>{" "}
-                              {Object.values(migrationReport.resultsMigrated).reduce((a, b) => a + b, 0)}
-                            </div>
-                            <div>
-                              <strong>Foute vragen:</strong>{" "}
-                              {Object.values(migrationReport.incorrectQuestionsMigrated).reduce((a, b) => a + b, 0)}
-                            </div>
-                            {migrationReport.errors.length > 0 && (
-                              <div className="text-red-600">
-                                <strong>Errors:</strong> {migrationReport.errors.length}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => handleQuestionImageUpload(q.number, e.target.files?.[0] || null)}
+                              className="text-xs"
+                            />
+                            {questionImages[q.number] && (
+                              <div className="mt-2 flex items-center gap-2 text-xs text-green-600">
+                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                    clipRule="evenodd"
+                                  />
+                                </svg>
+                                {questionImages[q.number].name}
                               </div>
                             )}
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                        <h3 className="font-semibold text-red-900 mb-2">Stap 2: Verwijder Oude Nodes</h3>
-                        <p className="text-sm text-red-800 mb-3">
-                          Na succesvolle migratie kun je de oude top-level nodes verwijderen. Controleer eerst in
-                          Firebase Console of alle data correct is gekopieerd!
-                        </p>
-                        <Button
-                          onClick={handleDeleteOldData}
-                          variant="destructive"
-                          disabled={isDeleting}
-                          className="w-full"
-                        >
-                          {isDeleting ? "Bezig met verwijderen..." : "Verwijder oude data nodes"}
-                        </Button>
+                        {q.optionsHaveImages && (
+                          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded">
+                            <p className="text-xs font-medium text-amber-700 mb-2">
+                              📷 Deze vraag heeft afbeeldingen in de antwoord opties
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="space-y-2">
+                          {/* Option A */}
+                          <label className="flex items-start gap-2 cursor-pointer hover:bg-muted/50 p-2 rounded">
+                            <input
+                              type="radio"
+                              name={`question-${q.number}`}
+                              checked={q.correctAnswer === "A"}
+                              onChange={() => updateCorrectAnswer(q.number, "A")}
+                              className="cursor-pointer mt-1"
+                            />
+                            <div className="flex-1">
+                              <span className={q.correctAnswer === "A" ? "text-green-600 font-medium" : ""}>
+                                A) {q.optionA}
+                              </span>
+                              {q.optionAImageDescription && (
+                                <div className="mt-2 ml-4 p-2 bg-white border border-amber-200 rounded">
+                                  <p className="text-xs text-amber-700 mb-1">Afbeelding: {q.optionAImageDescription}</p>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) =>
+                                      handleOptionImageUpload(q.number, "a", e.target.files?.[0] || null)
+                                    }
+                                    className="text-xs"
+                                  />
+                                  {questionOptionImages[q.number]?.a && (
+                                    <div className="mt-2 flex items-center gap-2 text-xs text-green-600">
+                                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                        <path
+                                          fillRule="evenodd"
+                                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                          clipRule="evenodd"
+                                        />
+                                      </svg>
+                                      {questionOptionImages[q.number].a.name}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </label>
+
+                          {/* Option B */}
+                          <label className="flex items-start gap-2 cursor-pointer hover:bg-muted/50 p-2 rounded">
+                            <input
+                              type="radio"
+                              name={`question-${q.number}`}
+                              checked={q.correctAnswer === "B"}
+                              onChange={() => updateCorrectAnswer(q.number, "B")}
+                              className="cursor-pointer mt-1"
+                            />
+                            <div className="flex-1">
+                              <span className={q.correctAnswer === "B" ? "text-green-600 font-medium" : ""}>
+                                B) {q.optionB}
+                              </span>
+                              {q.optionBImageDescription && (
+                                <div className="mt-2 ml-4 p-2 bg-white border border-amber-200 rounded">
+                                  <p className="text-xs text-amber-700 mb-1">Afbeelding: {q.optionBImageDescription}</p>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) =>
+                                      handleOptionImageUpload(q.number, "b", e.target.files?.[0] || null)
+                                    }
+                                    className="text-xs"
+                                  />
+                                  {questionOptionImages[q.number]?.b && (
+                                    <div className="mt-2 flex items-center gap-2 text-xs text-green-600">
+                                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                        <path
+                                          fillRule="evenodd"
+                                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                          clipRule="evenodd"
+                                        />
+                                      </svg>
+                                      {questionOptionImages[q.number].b.name}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </label>
+
+                          {/* Option C */}
+                          <label className="flex items-start gap-2 cursor-pointer hover:bg-muted/50 p-2 rounded">
+                            <input
+                              type="radio"
+                              name={`question-${q.number}`}
+                              checked={q.correctAnswer === "C"}
+                              onChange={() => updateCorrectAnswer(q.number, "C")}
+                              className="cursor-pointer mt-1"
+                            />
+                            <div className="flex-1">
+                              <span className={q.correctAnswer === "C" ? "text-green-600 font-medium" : ""}>
+                                C) {q.optionC}
+                              </span>
+                              {q.optionCImageDescription && (
+                                <div className="mt-2 ml-4 p-2 bg-white border border-amber-200 rounded">
+                                  <p className="text-xs text-amber-700 mb-1">Afbeelding: {q.optionCImageDescription}</p>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) =>
+                                      handleOptionImageUpload(q.number, "c", e.target.files?.[0] || null)
+                                    }
+                                    className="text-xs"
+                                  />
+                                  {questionOptionImages[q.number]?.c && (
+                                    <div className="mt-2 flex items-center gap-2 text-xs text-green-600">
+                                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                        <path
+                                          fillRule="evenodd"
+                                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                          clipRule="evenodd"
+                                        />
+                                      </svg>
+                                      {questionOptionImages[q.number].c.name}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </label>
+
+                          {/* Option D */}
+                          <label className="flex items-start gap-2 cursor-pointer hover:bg-muted/50 p-2 rounded">
+                            <input
+                              type="radio"
+                              name={`question-${q.number}`}
+                              checked={q.correctAnswer === "D"}
+                              onChange={() => updateCorrectAnswer(q.number, "D")}
+                              className="cursor-pointer mt-1"
+                            />
+                            <div className="flex-1">
+                              <span className={q.correctAnswer === "D" ? "text-green-600 font-medium" : ""}>
+                                D) {q.optionD}
+                              </span>
+                              {q.optionDImageDescription && (
+                                <div className="mt-2 ml-4 p-2 bg-white border border-amber-200 rounded">
+                                  <p className="text-xs text-amber-700 mb-1">Afbeelding: {q.optionDImageDescription}</p>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) =>
+                                      handleOptionImageUpload(q.number, "d", e.target.files?.[0] || null)
+                                    }
+                                    className="text-xs"
+                                  />
+                                  {questionOptionImages[q.number]?.d && (
+                                    <div className="mt-2 flex items-center gap-2 text-xs text-green-600">
+                                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                        <path
+                                          fillRule="evenodd"
+                                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                          clipRule="evenodd"
+                                        />
+                                      </svg>
+                                      {questionOptionImages[q.number].d.name}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </label>
+                        </div>
                       </div>
-                    </>
-                  )}
+                    ))}
+                  </div>
+
+                  <div className="flex gap-2 mt-6">
+                    <Button
+                      onClick={handleSmartSave}
+                      className="flex-1"
+                      disabled={!newCategoryName.trim() && !isAddingToExistingCategory}
+                    >
+                      Vragen Opslaan
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setShowUploadModal(false)
+                        setQuestionsText("")
+                        setParsedQuestions([])
+                        setEditableParsedQuestions([])
+                        setNewCategoryName("")
+                        setNewCategoryDescription("")
+                        setNewCategoryIcon(null)
+                        setNewCategoryIconPreview("")
+                        setQuestionImages({})
+                        setQuestionOptionImages({})
+                        setUploadModalSelectedSeries("1")
+                        setCustomReeks("")
+                        setIsAddingToExistingCategory(false)
+                      }}
+                    >
+                      Annuleren
+                    </Button>
+                  </div>
                 </>
               )}
-            </CardContent>
-            <div className="border-t p-4 flex gap-2">
-              <Button
-                onClick={() => {
-                  setShowMigrationModal(false)
-                  setMigrationStatus(null)
-                  setOldDataDetails(null)
-                  setMigrationReport(null)
-                }}
-                className="w-full"
-                variant="outline"
-              >
-                Sluiten
-              </Button>
             </div>
-          </Card>
-        </div>
-      )}
-    </main>
+          </DialogContent>
+        </Dialog>
+
+        {showQuestionBrowser && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <Card className="w-full max-w-4xl max-h-[90vh] flex flex-col">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle>
+                    Vragen Overzicht - {allCategories.find((c) => c.id === selectedCategory)?.name || selectedCategory}
+                  </CardTitle>
+                  <Button variant="ghost" size="sm" onClick={() => setShowQuestionBrowser(false)}>
+                    Sluiten
+                  </Button>
+                </div>
+                <CardDescription>Klik op een vraag om deze aan te passen</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4 flex-1 flex flex-col min-h-0">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-sm font-medium mb-2 block">Filter op Reeks</label>
+                    <Select value={selectedQuestionSet} onValueChange={setSelectedQuestionSet}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue className="truncate" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Alle Reeksen ({totalQuestionsCount} vragen)</SelectItem>
+                        {availableReeksOptions
+                          .filter((option) => option.value !== "new")
+                          .map((option) => {
+                            // Removed lookup in availableQuestionSets
+                            return (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label} ({getQuestionCountForSet(option.value)} vragen)
+                              </SelectItem>
+                            )
+                          })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium mb-2 block">Filter op Afbeeldingen</label>
+                    <Select
+                      value={showOnlyMissingImages ? "missing" : "all"}
+                      onValueChange={(value) => setShowOnlyMissingImages(value === "missing")}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Alle vragen</SelectItem>
+                        <SelectItem value="missing">Alleen ontbrekende afbeeldingen</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium mb-2 block">Zoeken</label>
+                    <Input
+                      placeholder="Zoek op nummer, tekst of optie..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    {filteredQuestions.length} vraag{filteredQuestions.length !== 1 ? "en" : ""} gevonden
+                  </div>
+                  {/* CHANGE: Added flex-wrap so all buttons are visible */}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleExportCategoryBackup}
+                      className="gap-2 bg-transparent"
+                    >
+                      <Download className="h-4 w-4" />
+                      Backup Exporteren
+                    </Button>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => setShowManualQuestionForm(true)}
+                      className="gap-2"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Nieuwe Vraag
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setShowPdfUploadInOverview(true)
+                      }}
+                      className="gap-2 bg-transparent"
+                    >
+                      <Upload className="h-4 w-4" />
+                      Vragen Toevoegen via PDF
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setShowRenameSeriesDialog(true)
+                      }}
+                      className="gap-2 bg-transparent"
+                    >
+                      <Pencil className="h-4 w-4" />
+                      Reeks Hernoemen
+                    </Button>
+                    <Button
+                      variant={isBulkEditMode ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setIsBulkEditMode(!isBulkEditMode)}
+                      className="gap-2"
+                    >
+                      <Pencil className="h-4 w-4" />
+                      {isBulkEditMode ? "Bulk Edit Actief" : "Bulk Edit Antwoorden"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (
+                          confirm(
+                            "Weet je zeker dat je deze reeks wilt verwijderen? Dit kan niet ongedaan worden gemaakt.",
+                          )
+                        ) {
+                          setShowDeleteSeriesDialog(true)
+                        }
+                      }}
+                      className="gap-2 bg-transparent text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Reeks Verwijderen
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-2 border rounded-lg p-4 min-h-0">
+                  {filteredQuestions.map((question, index) => {
+                    const isEditing = editingQuestionId === question.id
+                    const editKey = `${selectedCategory}-${question.id}` // Construct key for saved edits
+                    const hasEdit = savedEdits[editKey] !== undefined
+                    const needsImage = !question.image && !question.questionImage // Check for both legacy and new field
+                    const hasImageDescription = question.imageDescription
+                    const needsOptionImages =
+                      question.optionsHaveImages &&
+                      (!question.optionImages || Object.keys(question.optionImages).length === 0)
+                    const hasMissingImages = (needsImage && hasImageDescription) || needsOptionImages
+
+                    return (
+                      <div
+                        key={question.id}
+                        className={cn(
+                          "border rounded-lg p-4 transition-all",
+                          isEditing ? "border-blue-500 bg-blue-50" : "hover:border-gray-300",
+                          hasEdit && "bg-amber-50 border-amber-200", // Geel/amber voor aangepaste vragen
+                          hasMissingImages && !isEditing && "bg-red-50 border-red-300", // Rood voor vragen met ontbrekende afbeeldingen
+                        )}
+                      >
+                        <div className="flex items-start gap-4">
+                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold text-xs">
+                            {question.id}
+                          </div>
+
+                          <div className="flex-1 space-y-3">
+                            {isEditing ? (
+                              <>
+                                <div>
+                                  <label className="text-sm font-medium">Vraag</label>
+                                  <Textarea
+                                    value={editFormData.question || ""}
+                                    onChange={(e) => setEditFormData({ ...editFormData, question: e.target.value })}
+                                    rows={3}
+                                    className="mt-1"
+                                  />
+
+                                  <div className="mt-3">
+                                    <label className="text-xs text-muted-foreground block mb-2">
+                                      Vraag afbeelding (optioneel)
+                                      {question.imageDescription && (
+                                        <span className="ml-2 text-orange-600 font-medium">
+                                          - Verwacht: {question.imageDescription}
+                                        </span>
+                                      )}
+                                    </label>
+                                    <Input type="hidden" name="questionImage" id="questionImage" />
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={async () => {
+                                        const inputElement = document.querySelector(
+                                          'input[name="questionImage"]',
+                                        ) as HTMLInputElement
+                                        const fileInput = document.createElement("input")
+                                        fileInput.type = "file"
+                                        fileInput.accept = "image/*"
+                                        fileInput.onchange = async (e) => {
+                                          const file = (e.target as HTMLInputElement).files?.[0]
+                                          if (file) {
+                                            const imageData = await handleImageUpload(e as any)
+                                            if (inputElement) inputElement.value = imageData
+                                            setEditFormData({ ...editFormData, questionImage: imageData })
+                                          }
+                                        }
+                                        fileInput.click()
+                                      }}
+                                    >
+                                      <Upload className="h-4 w-4 mr-2" />
+                                      Afbeelding uploaden
+                                    </Button>
+                                    {editFormData.questionImage && (
+                                      <div className="mt-2 relative inline-block">
+                                        <img
+                                          src={editFormData.questionImage || "/placeholder.svg"}
+                                          alt="Vraag afbeelding"
+                                          className="max-w-xs rounded border"
+                                        />
+                                        <Button
+                                          variant="destructive"
+                                          size="sm"
+                                          className="absolute top-1 right-1"
+                                          onClick={() => setEditFormData({ ...editFormData, questionImage: "" })}
+                                        >
+                                          <X className="h-3 w-3" />
+                                        </Button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                  <label className="text-sm font-medium block">
+                                    Antwoorden (klik op het juiste antwoord)
+                                  </label>
+
+                                  <div
+                                    onClick={() => setEditFormData({ ...editFormData, correct: "a" })}
+                                    className={cn(
+                                      "p-3 border-2 rounded-lg cursor-pointer transition-all",
+                                      editFormData.correct === "a"
+                                        ? "border-green-500 bg-green-50"
+                                        : "border-gray-200 hover:border-gray-300",
+                                    )}
+                                  >
+                                    <div className="flex items-start gap-2">
+                                      <span
+                                        className={cn(
+                                          "font-semibold text-sm min-w-[20px]",
+                                          editFormData.correct === "a" ? "text-green-700" : "text-gray-700",
+                                        )}
+                                      >
+                                        A:
+                                      </span>
+                                      <div className="flex-1" onClick={(e) => e.stopPropagation()}>
+                                        <Input
+                                          value={editFormData.optionA || ""}
+                                          onChange={(e) =>
+                                            setEditFormData({ ...editFormData, optionA: e.target.value })
+                                          }
+                                          className="border-0 p-0 h-auto focus-visible:ring-0 mb-2"
+                                        />
+                                        <Input type="hidden" name="optionAImage" id="optionAImage" />
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={async () => {
+                                            const inputElement = document.querySelector(
+                                              'input[name="optionAImage"]',
+                                            ) as HTMLInputElement
+                                            const fileInput = document.createElement("input")
+                                            fileInput.type = "file"
+                                            fileInput.accept = "image/*"
+                                            fileInput.onchange = async (e) => {
+                                              const file = (e.target as HTMLInputElement).files?.[0]
+                                              if (file) {
+                                                const imageData = await handleImageUpload(e as any)
+                                                if (inputElement) inputElement.value = imageData
+                                                setEditFormData({
+                                                  ...editFormData,
+                                                  optionAImage: imageData,
+                                                  optionA: "", // Clear the text when image is uploaded
+                                                })
+                                              }
+                                            }
+                                            fileInput.click()
+                                          }}
+                                          className="text-xs"
+                                        >
+                                          <Upload className="h-3 w-3 mr-1" />
+                                          Img
+                                        </Button>
+                                        {editFormData.optionAImage && (
+                                          <div className="mt-2 relative inline-block">
+                                            <img
+                                              src={editFormData.optionAImage || "/placeholder.svg"}
+                                              alt="Optie A"
+                                              className="max-w-[150px] rounded border"
+                                            />
+                                            <Button
+                                              variant="destructive"
+                                              size="sm"
+                                              className="absolute top-0 right-0"
+                                              onClick={() => setEditFormData({ ...editFormData, optionAImage: "" })}
+                                            >
+                                              <X className="h-2 w-2" />
+                                            </Button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div
+                                    onClick={() => setEditFormData({ ...editFormData, correct: "b" })}
+                                    className={cn(
+                                      "p-3 border-2 rounded-lg cursor-pointer transition-all",
+                                      editFormData.correct === "b"
+                                        ? "border-green-500 bg-green-50"
+                                        : "border-gray-200 hover:border-gray-300",
+                                    )}
+                                  >
+                                    <div className="flex items-start gap-2">
+                                      <span
+                                        className={cn(
+                                          "font-semibold text-sm min-w-[20px]",
+                                          editFormData.correct === "b" ? "text-green-700" : "text-gray-700",
+                                        )}
+                                      >
+                                        B:
+                                      </span>
+                                      <div className="flex-1" onClick={(e) => e.stopPropagation()}>
+                                        <Input
+                                          value={editFormData.optionB || ""}
+                                          onChange={(e) =>
+                                            setEditFormData({ ...editFormData, optionB: e.target.value })
+                                          }
+                                          className="border-0 p-0 h-auto focus-visible:ring-0 mb-2"
+                                        />
+                                        <Input type="hidden" name="optionBImage" id="optionBImage" />
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={async () => {
+                                            const inputElement = document.querySelector(
+                                              'input[name="optionBImage"]',
+                                            ) as HTMLInputElement
+                                            const fileInput = document.createElement("input")
+                                            fileInput.type = "file"
+                                            fileInput.accept = "image/*"
+                                            fileInput.onchange = async (e) => {
+                                              const file = (e.target as HTMLInputElement).files?.[0]
+                                              if (file) {
+                                                const imageData = await handleImageUpload(e as any)
+                                                if (inputElement) inputElement.value = imageData
+                                                setEditFormData({
+                                                  ...editFormData,
+                                                  optionBImage: imageData,
+                                                  optionB: "", // Clear the text when image is uploaded
+                                                })
+                                              }
+                                            }
+                                            fileInput.click()
+                                          }}
+                                          className="text-xs"
+                                        >
+                                          <Upload className="h-3 w-3 mr-1" />
+                                          Img
+                                        </Button>
+                                        {editFormData.optionBImage && (
+                                          <div className="mt-2 relative inline-block">
+                                            <img
+                                              src={editFormData.optionBImage || "/placeholder.svg"}
+                                              alt="Optie B"
+                                              className="max-w-[150px] rounded border"
+                                            />
+                                            <Button
+                                              variant="destructive"
+                                              size="sm"
+                                              className="absolute top-0 right-0"
+                                              onClick={() => setEditFormData({ ...editFormData, optionBImage: "" })}
+                                            >
+                                              <X className="h-2 w-2" />
+                                            </Button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div
+                                    onClick={() => setEditFormData({ ...editFormData, correct: "c" })}
+                                    className={cn(
+                                      "p-3 border-2 rounded-lg cursor-pointer transition-all",
+                                      editFormData.correct === "c"
+                                        ? "border-green-500 bg-green-50"
+                                        : "border-gray-200 hover:border-gray-300",
+                                    )}
+                                  >
+                                    <div className="flex items-start gap-2">
+                                      <span
+                                        className={cn(
+                                          "font-semibold text-sm min-w-[20px]",
+                                          editFormData.correct === "c" ? "text-green-700" : "text-gray-700",
+                                        )}
+                                      >
+                                        C:
+                                      </span>
+                                      <div className="flex-1" onClick={(e) => e.stopPropagation()}>
+                                        <Input
+                                          value={editFormData.optionC || ""}
+                                          onChange={(e) =>
+                                            setEditFormData({ ...editFormData, optionC: e.target.value })
+                                          }
+                                          className="border-0 p-0 h-auto focus-visible:ring-0 mb-2"
+                                        />
+                                        <Input type="hidden" name="optionCImage" id="optionCImage" />
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={async () => {
+                                            const inputElement = document.querySelector(
+                                              'input[name="optionCImage"]',
+                                            ) as HTMLInputElement
+                                            const fileInput = document.createElement("input")
+                                            fileInput.type = "file"
+                                            fileInput.accept = "image/*"
+                                            fileInput.onchange = async (e) => {
+                                              const file = (e.target as HTMLInputElement).files?.[0]
+                                              if (file) {
+                                                const imageData = await handleImageUpload(e as any)
+                                                if (inputElement) inputElement.value = imageData
+                                                setEditFormData({
+                                                  ...editFormData,
+                                                  optionCImage: imageData,
+                                                  optionC: "", // Clear the text when image is uploaded
+                                                })
+                                              }
+                                            }
+                                            fileInput.click()
+                                          }}
+                                          className="text-xs"
+                                        >
+                                          <Upload className="h-3 w-3 mr-1" />
+                                          Img
+                                        </Button>
+                                        {editFormData.optionCImage && (
+                                          <div className="mt-2 relative inline-block">
+                                            <img
+                                              src={editFormData.optionCImage || "/placeholder.svg"}
+                                              alt="Optie C"
+                                              className="max-w-[150px] rounded border"
+                                            />
+                                            <Button
+                                              variant="destructive"
+                                              size="sm"
+                                              className="absolute top-0 right-0"
+                                              onClick={() => setEditFormData({ ...editFormData, optionCImage: "" })}
+                                            >
+                                              <X className="h-2 w-2" />
+                                            </Button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div
+                                    onClick={() => setEditFormData({ ...editFormData, correct: "d" })}
+                                    className={cn(
+                                      "p-3 border-2 rounded-lg cursor-pointer transition-all",
+                                      editFormData.correct === "d"
+                                        ? "border-green-500 bg-green-50"
+                                        : "border-gray-200 hover:border-gray-300",
+                                    )}
+                                  >
+                                    <div className="flex items-start gap-2">
+                                      <span
+                                        className={cn(
+                                          "font-semibold text-sm min-w-[20px]",
+                                          editFormData.correct === "d" ? "text-green-700" : "text-gray-700",
+                                        )}
+                                      >
+                                        D:
+                                      </span>
+                                      <div className="flex-1" onClick={(e) => e.stopPropagation()}>
+                                        <Input
+                                          value={editFormData.optionD || ""}
+                                          onChange={(e) =>
+                                            setEditFormData({ ...editFormData, optionD: e.target.value })
+                                          }
+                                          className="border-0 p-0 h-auto focus-visible:ring-0 mb-2"
+                                        />
+                                        <Input type="hidden" name="optionDImage" id="optionDImage" />
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={async () => {
+                                            const inputElement = document.querySelector(
+                                              'input[name="optionDImage"]',
+                                            ) as HTMLInputElement
+                                            const fileInput = document.createElement("input")
+                                            fileInput.type = "file"
+                                            fileInput.accept = "image/*"
+                                            fileInput.onchange = async (e) => {
+                                              const file = (e.target as HTMLInputElement).files?.[0]
+                                              if (file) {
+                                                const imageData = await handleImageUpload(e as any)
+                                                if (inputElement) inputElement.value = imageData
+                                                setEditFormData({
+                                                  ...editFormData,
+                                                  optionDImage: imageData,
+                                                  optionD: "", // Clear the text when image is uploaded
+                                                })
+                                              }
+                                            }
+                                            fileInput.click()
+                                          }}
+                                          className="text-xs"
+                                        >
+                                          <Upload className="h-3 w-3 mr-1" />
+                                          Img
+                                        </Button>
+                                        {editFormData.optionDImage && (
+                                          <div className="mt-2 relative inline-block">
+                                            <img
+                                              src={editFormData.optionDImage || "/placeholder.svg"}
+                                              alt="Optie D"
+                                              className="max-w-[150px] rounded border"
+                                            />
+                                            <Button
+                                              variant="destructive"
+                                              size="sm"
+                                              className="absolute top-0 right-0"
+                                              onClick={() => setEditFormData({ ...editFormData, optionDImage: "" })}
+                                            >
+                                              <X className="h-2 w-2" />
+                                            </Button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex gap-2 justify-end">
+                                  <Button onClick={handleSaveInlineEdit} size="sm" isSaving={isSaving}>
+                                    {isSaving ? "Opslaan..." : "Opslaan"}
+                                  </Button>
+                                  <Button variant="outline" size="sm" onClick={handleCancelEdit}>
+                                    Annuleren
+                                  </Button>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <p className="font-medium">{question.question}</p>
+                                <div className="space-y-2 text-sm">
+                                  {question.options.a && (
+                                    <p
+                                      onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "a")}
+                                      className={cn(
+                                        "flex items-center gap-2",
+                                        question.correctAnswer?.toUpperCase() === "A" && "text-green-600 font-semibold",
+                                        isBulkEditMode &&
+                                          "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
+                                      )}
+                                    >
+                                      <span className="font-semibold">A:</span> {question.options.a}
+                                      {question.optionImages?.a && (
+                                        <img
+                                          src={question.optionImages.a || "/placeholder.svg"}
+                                          alt="Optie A"
+                                          className="max-w-[100px] max-h-12 rounded border"
+                                        />
+                                      )}
+                                    </p>
+                                  )}
+                                  {question.options.b && (
+                                    <p
+                                      onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "b")}
+                                      className={cn(
+                                        "flex items-center gap-2",
+                                        question.correctAnswer?.toUpperCase() === "B" && "text-green-600 font-semibold",
+                                        isBulkEditMode &&
+                                          "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
+                                      )}
+                                    >
+                                      <span className="font-semibold">B:</span> {question.options.b}
+                                      {question.optionImages?.b && (
+                                        <img
+                                          src={question.optionImages.b || "/placeholder.svg"}
+                                          alt="Optie B"
+                                          className="max-w-[100px] max-h-12 rounded border"
+                                        />
+                                      )}
+                                    </p>
+                                  )}
+                                  {question.options.c && (
+                                    <p
+                                      onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "c")}
+                                      className={cn(
+                                        "flex items-center gap-2",
+                                        question.correctAnswer?.toUpperCase() === "C" && "text-green-600 font-semibold",
+                                        isBulkEditMode &&
+                                          "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
+                                      )}
+                                    >
+                                      <span className="font-semibold">C:</span> {question.options.c}
+                                      {question.optionImages?.c && (
+                                        <img
+                                          src={question.optionImages.c || "/placeholder.svg"}
+                                          alt="Optie C"
+                                          className="max-w-[100px] max-h-12 rounded border"
+                                        />
+                                      )}
+                                    </p>
+                                  )}
+                                  {question.options.d && (
+                                    <p
+                                      onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "d")}
+                                      className={cn(
+                                        "flex items-center gap-2",
+                                        question.correctAnswer?.toUpperCase() === "D" && "text-green-600 font-semibold",
+                                        isBulkEditMode &&
+                                          "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
+                                      )}
+                                    >
+                                      <span className="font-semibold">D:</span> {question.options.d}
+                                      {question.optionImages?.d && (
+                                        <img
+                                          src={question.optionImages.d || "/placeholder.svg"}
+                                          alt="Optie D"
+                                          className="max-w-[100px] max-h-12 rounded border"
+                                        />
+                                      )}
+                                    </p>
+                                  )}
+                                </div>
+                                {question.questionImage && (
+                                  <div className="mt-3">
+                                    <img
+                                      src={question.questionImage || "/placeholder.svg"}
+                                      alt="Vraag afbeelding"
+                                      className="max-w-xs rounded border"
+                                    />
+                                  </div>
+                                )}
+                                {needsImage && hasImageDescription && (
+                                  <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded text-xs text-red-800">
+                                    <span>📷 Afbeelding vereist: {question.imageDescription}</span>
+                                  </div>
+                                )}
+                                {needsOptionImages && (
+                                  <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded text-xs text-red-800">
+                                    <span>📷 Afbeeldingen vereist in antwoord opties</span>
+                                  </div>
+                                )}
+                                {hasEdit && (
+                                  <div className="mt-3 text-xs text-amber-700 italic">✓ Deze vraag is aangepast.</div>
+                                )}
+                              </>
+                            )}
+                          </div>
+
+                          <div className="flex flex-col gap-2">
+                            {!isEditing && (
+                              <>
+                                <Button variant="ghost" size="sm" onClick={() => handleStartEdit(question)}>
+                                  <Pencil className="w-4 h-4" />
+                                </Button>
+                                <Button variant="ghost" size="sm" onClick={() => handleDeleteQuestion(question.id)}>
+                                  <Trash2 className="w-4 h-4 text-destructive" />
+                                </Button>
+                                {hasEdit && (
+                                  <Button variant="ghost" size="sm" onClick={() => handleDeleteEdit(editKey)}>
+                                    <X className="w-4 h-4 text-gray-500" />
+                                  </Button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {filteredQuestions.length === 0 && (
+                    <p className="text-center text-muted-foreground py-8">Geen vragen gevonden met deze filters.</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        <Dialog open={showManualQuestionForm} onOpenChange={setShowManualQuestionForm}>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Nieuwe Vraag Toevoegen</DialogTitle>
+              <DialogDescription>Voeg een nieuwe vraag toe aan de geselecteerde categorie.</DialogDescription>
+            </DialogHeader>
+            <form ref={formRef} onSubmit={handleManualQuestionSave}>
+              <div className="space-y-4 max-h-[70vh] overflow-y-auto p-2">
+                <div>
+                  <Label htmlFor="question">Vraag</Label>
+                  <Textarea
+                    id="question"
+                    name="question"
+                    rows={3}
+                    value={manualQuestionData.question}
+                    onChange={(e) => updateManualQuestionField("question", e.target.value)}
+                    required
+                    className="mt-1"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="questionImage">Vraag Afbeelding (optioneel)</Label>
+                    <Input type="hidden" name="questionImage" id="questionImage" />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const inputElement = document.querySelector('input[name="questionImage"]') as HTMLInputElement
+                        const fileInput = document.createElement("input")
+                        fileInput.type = "file"
+                        fileInput.accept = "image/*"
+                        fileInput.onchange = async (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0]
+                          if (file) {
+                            const imageData = await handleImageUpload(e as any)
+                            if (inputElement) inputElement.value = imageData
+                            updateManualQuestionField("questionImage", imageData)
+                          }
+                        }
+                        fileInput.click()
+                      }}
+                      className="mt-2 text-xs"
+                    >
+                      <Upload className="h-3 w-3 mr-1" />
+                      Upload Afbeelding
+                    </Button>
+                    {manualQuestionData.questionImage && (
+                      <div className="mt-1 relative inline-block">
+                        <img
+                          src={manualQuestionData.questionImage || "/placeholder.svg"}
+                          alt="Vraag afbeelding"
+                          className="max-w-[150px] rounded border"
+                        />
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="absolute top-0 right-0"
+                          onClick={() => updateManualQuestionField("questionImage", "")}
+                        >
+                          <X className="h-2 w-2" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="optionA">Optie A</Label>
+                    <Input
+                      id="optionA"
+                      name="optionA"
+                      value={manualQuestionData.optionA}
+                      onChange={(e) => updateManualQuestionField("optionA", e.target.value)}
+                      required
+                      className="mt-1"
+                    />
+                    <Input type="hidden" name="optionAImage" id="optionAImage" />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const inputElement = document.querySelector('input[name="optionAImage"]') as HTMLInputElement
+                        const fileInput = document.createElement("input")
+                        fileInput.type = "file"
+                        fileInput.accept = "image/*"
+                        fileInput.onchange = async (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0]
+                          if (file) {
+                            const imageData = await handleImageUpload(e as any)
+                            if (inputElement) inputElement.value = imageData
+                            updateManualQuestionField("optionAImage", imageData)
+                          }
+                        }
+                        fileInput.click()
+                      }}
+                      className="mt-2 text-xs"
+                    >
+                      <Upload className="h-3 w-3 mr-1" />
+                      Upload Afbeelding
+                    </Button>
+                    {manualQuestionData.optionAImage && (
+                      <div className="mt-1 relative inline-block">
+                        <img
+                          src={manualQuestionData.optionAImage || "/placeholder.svg"}
+                          alt="Optie A afbeelding"
+                          className="max-w-[150px] rounded border"
+                        />
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="absolute top-0 right-0"
+                          onClick={() => updateManualQuestionField("optionAImage", "")}
+                        >
+                          <X className="h-2 w-2" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="optionB">Optie B</Label>
+                    <Input
+                      id="optionB"
+                      name="optionB"
+                      value={manualQuestionData.optionB}
+                      onChange={(e) => updateManualQuestionField("optionB", e.target.value)}
+                      required
+                      className="mt-1"
+                    />
+                    <Input type="hidden" name="optionBImage" id="optionBImage" />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const inputElement = document.querySelector('input[name="optionBImage"]') as HTMLInputElement
+                        const fileInput = document.createElement("input")
+                        fileInput.type = "file"
+                        fileInput.accept = "image/*"
+                        fileInput.onchange = async (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0]
+                          if (file) {
+                            const imageData = await handleImageUpload(e as any)
+                            if (inputElement) inputElement.value = imageData
+                            updateManualQuestionField("optionBImage", imageData)
+                          }
+                        }
+                        fileInput.click()
+                      }}
+                      className="mt-2 text-xs"
+                    >
+                      <Upload className="h-3 w-3 mr-1" />
+                      Upload Afbeelding
+                    </Button>
+                    {manualQuestionData.optionBImage && (
+                      <div className="mt-1 relative inline-block">
+                        <img
+                          src={manualQuestionData.optionBImage || "/placeholder.svg"}
+                          alt="Optie B afbeelding"
+                          className="max-w-[150px] rounded border"
+                        />
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="absolute top-0 right-0"
+                          onClick={() => updateManualQuestionField("optionBImage", "")}
+                        >
+                          <X className="h-2 w-2" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="optionC">Optie C</Label>
+                    <Input
+                      id="optionC"
+                      name="optionC"
+                      value={manualQuestionData.optionC}
+                      onChange={(e) => updateManualQuestionField("optionC", e.target.value)}
+                      required
+                      className="mt-1"
+                    />
+                    <Input type="hidden" name="optionCImage" id="optionCImage" />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const inputElement = document.querySelector('input[name="optionCImage"]') as HTMLInputElement
+                        const fileInput = document.createElement("input")
+                        fileInput.type = "file"
+                        fileInput.accept = "image/*"
+                        fileInput.onchange = async (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0]
+                          if (file) {
+                            const imageData = await handleImageUpload(e as any)
+                            if (inputElement) inputElement.value = imageData
+                            updateManualQuestionField("optionCImage", imageData)
+                          }
+                        }
+                        fileInput.click()
+                      }}
+                      className="mt-2 text-xs"
+                    >
+                      <Upload className="h-3 w-3 mr-1" />
+                      Upload Afbeelding
+                    </Button>
+                    {manualQuestionData.optionCImage && (
+                      <div className="mt-1 relative inline-block">
+                        <img
+                          src={manualQuestionData.optionCImage || "/placeholder.svg"}
+                          alt="Optie C afbeelding"
+                          className="max-w-[150px] rounded border"
+                        />
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="absolute top-0 right-0"
+                          onClick={() => updateManualQuestionField("optionCImage", "")}
+                        >
+                          <X className="h-2 w-2" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="optionD">Optie D (optioneel)</Label>
+                    <Input
+                      id="optionD"
+                      name="optionD"
+                      value={manualQuestionData.optionD}
+                      onChange={(e) => updateManualQuestionField("optionD", e.target.value)}
+                      className="mt-1"
+                    />
+                    <Input type="hidden" name="optionDImage" id="optionDImage" />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const inputElement = document.querySelector('input[name="optionDImage"]') as HTMLInputElement
+                        const fileInput = document.createElement("input")
+                        fileInput.type = "file"
+                        fileInput.accept = "image/*"
+                        fileInput.onchange = async (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0]
+                          if (file) {
+                            const imageData = await handleImageUpload(e as any)
+                            if (inputElement) inputElement.value = imageData
+                            updateManualQuestionField("optionDImage", imageData)
+                          }
+                        }
+                        fileInput.click()
+                      }}
+                      className="mt-2 text-xs"
+                    >
+                      <Upload className="h-3 w-3 mr-1" />
+                      Upload Afbeelding
+                    </Button>
+                    {manualQuestionData.optionDImage && (
+                      <div className="mt-1 relative inline-block">
+                        <img
+                          src={manualQuestionData.optionDImage || "/placeholder.svg"}
+                          alt="Optie D afbeelding"
+                          className="max-w-[150px] rounded border"
+                        />
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="absolute top-0 right-0"
+                          onClick={() => updateManualQuestionField("optionDImage", "")}
+                        >
+                          <X className="h-2 w-2" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="col-span-1">
+                    <Label>Correct Antwoord</Label>
+                    <RadioGroup
+                      value={selectedCorrectAnswer}
+                      onValueChange={(value: "a" | "b" | "c" | "d") => setSelectedCorrectAnswer(value)}
+                      className="flex flex-col space-y-3 mt-2"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="a" id="correctA" />
+                        <Label htmlFor="correctA">A</Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="b" id="correctB" />
+                        <Label htmlFor="correctB">B</Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="c" id="correctC" />
+                        <Label htmlFor="correctC">C</Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="d" id="correctD" />
+                        <Label htmlFor="correctD">D</Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-1">
+                    <Label htmlFor="reeks">Reeks</Label>
+                    <Select value={selectedReeks} onValueChange={setSelectedReeks}>
+                      <SelectTrigger id="reeks" className="mt-1">
+                        <SelectValue placeholder="Selecteer reeks" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableReeksOptions
+                          .filter((option) => option.value !== "new")
+                          .map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        <SelectItem value="new">➕ Nieuwe reeks...</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {selectedReeks === "new" && (
+                    <div className="col-span-1">
+                      <Label htmlFor="customReeks">Nieuwe Reeks Naam</Label>
+                      <Input
+                        id="customReeks"
+                        name="customReeks"
+                        value={customReeksInput}
+                        onChange={handleCustomReeksChange}
+                        placeholder="Geef de nieuwe reeks een naam"
+                        className="mt-1"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+              <DialogFooter className="mt-6 pt-4 border-t">
+                <Button type="submit" className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Vraag Toevoegen
+                </Button>
+                <Button variant="outline" onClick={() => setShowManualQuestionForm(false)}>
+                  Annuleren
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {showPdfUploadInOverview && (
+          <Dialog open={showPdfUploadInOverview} onOpenChange={setShowPdfUploadInOverview}>
+            <DialogContent className="max-w-3xl">
+              <DialogHeader>
+                <DialogTitle>Upload PDF</DialogTitle>
+                <DialogDescription>Upload een PDF-bestand om vragen te extraheren.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="border rounded-lg p-4 text-center">
+                  <label
+                    htmlFor="pdfFile"
+                    className="cursor-pointer flex flex-col items-center justify-center space-y-2 py-6"
+                  >
+                    <Upload className="h-8 w-8 text-primary" />
+                    <span className="text-sm font-medium">Klik om PDF te selecteren</span>
+                    <span className="text-xs text-muted-foreground">Ondersteund: PDF</span>
+                  </label>
+                  <input id="pdfFile" type="file" accept=".pdf" onChange={handlePdfUpload} className="hidden" />
+                  {isProcessingPdf && (
+                    <div className="mt-4 text-center space-y-2">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto" />
+                      <p className="text-sm text-muted-foreground">PDF verwerken...</p>
+                    </div>
+                  )}
+                </div>
+
+                {questionsText && (
+                  <>
+                    <h3 className="font-semibold">Geëxtraheerde tekst:</h3>
+                    <Textarea
+                      value={questionsText}
+                      onChange={(e) => setQuestionsText(e.target.value)}
+                      className="min-h-[150px] font-mono text-sm"
+                    />
+                    <Button onClick={handleParseTextInOverview} className="w-full">
+                      Tekst Parset voor Review
+                    </Button>
+                  </>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {showReeksUpdate && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <Card className="w-full max-w-2xl">
+              <CardHeader>
+                <CardTitle>Update Reeksen</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {!reeksUpdateResult ? (
+                  <>
+                    <p className="text-sm text-muted-foreground">
+                      Deze functie update de 'reeks' velden van bestaande vragen. Dit kan handig zijn als je vragen hebt
+                      toegevoegd zonder een specifieke reeks, of als je de reeksnamen wilt normaliseren. De functie zal
+                      proberen de 'reeks' velden te herkennen en te standaardiseren.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button onClick={handleUpdateReeks} disabled={isReeksUpdating}>
+                        {isReeksUpdating ? "Bezig met updaten..." : "Start Update"}
+                      </Button>
+                      <Button variant="outline" onClick={() => setShowReeksUpdate(false)}>
+                        Annuleren
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div
+                      className={`p-4 rounded-lg ${reeksUpdateResult.success ? "bg-green-500/10" : "bg-red-500/10"}`}
+                    >
+                      <p className={`font-semibold ${reeksUpdateResult.success ? "text-green-600" : "text-red-600"}`}>
+                        {reeksUpdateResult.success
+                          ? `Update voltooid: ${reeksUpdateResult.questionsUpdated} vragen bijgewerkt.`
+                          : `Update mislukt: ${reeksUpdateResult.errors.join(", ")}`}
+                      </p>
+                    </div>
+                    <Button
+                      onClick={() => {
+                        setShowReeksUpdate(false)
+                        setReeksUpdateResult(null)
+                      }}
+                      className="w-full"
+                    >
+                      Sluiten
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        <Dialog open={showStaticMigration} onOpenChange={setShowStaticMigration}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Migreer Statische Vragen</DialogTitle>
+              <DialogDescription>Migreert de oudere statische vraagsets naar de Firebase database.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              {!staticMigrationResult ? (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Deze functie importeert de originele vraagsets (zoals Radar, Matrozen) naar de Firebase database. Na
+                    migratie kunnen deze vragen worden bewerkt en beheerd via het admin panel.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button onClick={handleMigrateStatic} disabled={isStaticMigrating}>
+                      {isStaticMigrating ? "Bezig met migreren..." : "Start Migratie"}
+                    </Button>
+                    <Button variant="outline" onClick={() => setShowStaticMigration(false)}>
+                      Annuleren
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div
+                    className={`p-4 rounded-lg ${staticMigrationResult.success ? "bg-green-500/10" : "bg-red-500/10"}`}
+                  >
+                    <p className={`font-semibold ${staticMigrationResult.success ? "text-green-600" : "text-red-600"}`}>
+                      {staticMigrationResult.success
+                        ? `Migratie voltooid! ${staticMigrationResult.migratedCount} vragen succesvol gemigreerd.`
+                        : `Migratie mislukt. Fouten: ${staticMigrationResult.errors.join(", ")}`}
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => {
+                      setShowStaticMigration(false)
+                      setStaticMigrationResult(null)
+                    }}
+                    className="w-full"
+                  >
+                    Sluiten
+                  </Button>
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={showRenameSeriesDialog} onOpenChange={setShowRenameSeriesDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Reeks Naam Wijzigen</DialogTitle>
+              <DialogDescription>
+                Wijzig de naam van een bestaande reeks. Alle vragen in deze reeks worden bijgewerkt.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="old-series-name">Huidige Reeks Naam</Label>
+                <Select value={renameSeriesOldName} onValueChange={setRenameSeriesOldName}>
+                  <SelectTrigger id="old-series-name">
+                    <SelectValue placeholder="Selecteer reeks om te hernoemen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableReeksOptions
+                      .filter((option) => option.value !== "new")
+                      .map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-series-name">Nieuwe Reeks Naam</Label>
+                <Input
+                  id="new-series-name"
+                  value={renameSeriesNewName}
+                  onChange={(e) => setRenameSeriesNewName(e.target.value)}
+                  placeholder="bijv: Hoofdstuk 2 - Navigatie"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowRenameSeriesDialog(false)} disabled={isRenamingSeries}>
+                Annuleren
+              </Button>
+              <Button onClick={handleRenameSeries} disabled={isRenamingSeries}>
+                {isRenamingSeries ? "Bezig met hernoemen..." : "Reeks Hernoemen"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={showDeleteSeriesDialog} onOpenChange={setShowDeleteSeriesDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Reeks Verwijderen</DialogTitle>
+              <DialogDescription>
+                Verwijder een reeks en alle bijbehorende vragen. Deze actie kan niet ongedaan worden gemaakt.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="delete-series-name">Reeks om te Verwijderen</Label>
+                <Select value={deleteSeriesName} onValueChange={setDeleteSeriesName}>
+                  <SelectTrigger id="delete-series-name">
+                    <SelectValue placeholder="Selecteer reeks om te verwijderen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableReeksOptions
+                      .filter((option) => option.value !== "new")
+                      .map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+                Let op: Alle vragen in deze reeks worden permanent verwijderd uit Firebase.
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowDeleteSeriesDialog(false)} disabled={isDeletingSeries}>
+                Annuleren
+              </Button>
+              <Button variant="destructive" onClick={handleDeleteSeries} disabled={isDeletingSeries}>
+                {isDeletingSeries ? "Bezig met verwijderen..." : "Reeks Verwijderen"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </div>
   )
 }

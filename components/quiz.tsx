@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
 import { CheckCircle2, XCircle, RotateCcw, Shuffle, ChevronLeft, AlertCircle } from "lucide-react"
-import { questionSets, type Question, type QuestionSet } from "@/lib/questions-data"
+import type { Question, QuestionSet } from "@/lib/radar-data"
 import {
   saveQuizResult,
   getSeriesAttempts,
@@ -19,12 +19,16 @@ import {
   removeIncorrectQuestion,
   getIncorrectQuestions,
   type QuizProgress,
+  getQuizProgress,
 } from "@/lib/firebase-service"
 import { useAuth } from "@/contexts/auth-context"
+import { db } from "@/lib/firebase-config"
+import { ref, get } from "firebase/database"
 
 interface QuizProps {
   onQuizComplete?: () => void
   onQuizStateChange?: (isActive: boolean) => void
+  category?: string // Added category prop
 }
 
 function shuffleArray<T>(array: T[]): T[] {
@@ -49,17 +53,46 @@ function convertQuestions(questions: Question[]): any[] {
       const hasImageOptions = q.optionImages && (q.optionImages.a || q.optionImages.b || q.optionImages.c)
       return hasTextOptions || hasImageOptions
     })
-    .map((q) => ({
-      ...q,
-      options: [
-        { label: "a", text: q.options.a },
-        { label: "b", text: q.options.b },
-        { label: "c", text: q.options.c },
-      ],
-      correctAnswer: q.correct,
-      correctAnswerText: q.options[q.correct],
-      optionImages: q.optionImages, // Explicitly pass through optionImages
-    }))
+    .map((q) => {
+      const options = []
+      // Add options - use text if available, otherwise use label for image-only questions
+      if (q.options.a !== undefined || q.optionImages?.a) {
+        options.push({
+          label: "a",
+          text: q.options.a || "", // Empty string for image-only options
+          image: q.optionImages?.a,
+        })
+      }
+      if (q.options.b !== undefined || q.optionImages?.b) {
+        options.push({
+          label: "b",
+          text: q.options.b || "",
+          image: q.optionImages?.b,
+        })
+      }
+      if (q.options.c !== undefined || q.optionImages?.c) {
+        options.push({
+          label: "c",
+          text: q.options.c || "",
+          image: q.optionImages?.c,
+        })
+      }
+      if (q.options.d !== undefined || q.optionImages?.d) {
+        options.push({
+          label: "d",
+          text: q.options.d || "",
+          image: q.optionImages?.d,
+        })
+      }
+
+      return {
+        ...q,
+        options,
+        correctAnswer: q.correctAnswer || q.correct,
+        correctAnswerText: q.options[q.correctAnswer || q.correct],
+        optionImages: q.optionImages, // Explicitly pass through optionImages
+      }
+    })
 }
 
 function shuffleAnswers(questions: any[]): any[] {
@@ -89,11 +122,11 @@ function shuffleAnswers(questions: any[]): any[] {
   })
 }
 
-function getQuestionsByIds(questionIds: string[]): Question[] {
+function getQuestionsByIds(questionIds: string[], questionSets: QuestionSet[]): Question[] {
   return questionSets.flatMap((set) => set.questions.filter((q) => questionIds.includes(q.id)))
 }
 
-export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
+export default function Quiz({ onQuizComplete, onQuizStateChange, category = "radar" }: QuizProps) {
   const { username, isAnonymous } = useAuth()
 
   const [selectedSet, setSelectedSet] = useState<QuestionSet | null>(null)
@@ -113,6 +146,141 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
   const [showResumeDialog, setShowResumeDialog] = useState(false)
   const [resumeSetId, setResumeSetId] = useState<string | null>(null)
   const [savedProgress, setSavedProgress] = useState<QuizProgress | null>(null)
+  const [questionSets, setQuestionSets] = useState<QuestionSet[]>([])
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState(true)
+
+  useEffect(() => {
+    const loadQuestions = async () => {
+      if (!category) {
+        setQuestionSets([])
+        setIsLoadingQuestions(false)
+        return
+      }
+
+      try {
+        setIsLoadingQuestions(true)
+
+        // Load Firebase questions for this category
+        const categoryId = category
+        const deletedRef = ref(db, `questions/${categoryId}/deleted`)
+        const deletedSnapshot = await get(deletedRef)
+        const deletedIds: string[] = []
+        if (deletedSnapshot.exists()) {
+          const deletedData = deletedSnapshot.val()
+          Object.keys(deletedData).forEach((key) => {
+            if (deletedData[key] === true) {
+              deletedIds.push(key)
+            }
+          })
+        }
+
+        // Load questionEdits overlay
+        const editsRef = ref(db, "questionEdits")
+        const editsSnapshot = await get(editsRef)
+        const questionEdits: Record<string, any> = editsSnapshot.exists() ? editsSnapshot.val() : {}
+        console.log("[v0] Loaded", Object.keys(questionEdits).length, "question edits from Firebase")
+
+        const questionsRef = ref(db, `questions/${categoryId}`)
+        const snapshot = await get(questionsRef)
+        if (snapshot.exists()) {
+          const data = snapshot.val()
+          const loadedQuestions = Object.entries(data)
+            .filter(([key]) => !deletedIds.includes(key))
+            .map(([key, q]) => {
+              // Merge edits if they exist for this question
+              const editKey = key // key format is already "category-id"
+              const edit = questionEdits[editKey]
+              const mergedQuestion = edit ? { ...q, ...edit } : q
+
+              return {
+                id: key,
+                question: mergedQuestion.question,
+                options: mergedQuestion.options,
+                correctAnswer: mergedQuestion.correctAnswer || mergedQuestion.correct,
+                image: mergedQuestion.questionImage || mergedQuestion.image || null,
+                optionImages: mergedQuestion.optionImages || null,
+                reeks: mergedQuestion.reeks || "1",
+              }
+            })
+
+          const testReeksQuestions = loadedQuestions.filter((q) => q.reeks && q.reeks.toLowerCase().includes("test"))
+          if (testReeksQuestions.length > 0) {
+            console.log("[v0] Test reeks questions found:", testReeksQuestions.length)
+            testReeksQuestions.forEach((q, index) => {
+              const rawQ = data[q.id]
+              const edit = questionEdits[q.id]
+              const merged = edit ? { ...rawQ, ...edit } : rawQ
+              console.log(`[v0] Test reeks question ${index + 1}:`, {
+                id: q.id,
+                question: q.question.substring(0, 50),
+                hasQuestionImage: !!merged.questionImage,
+                hasImage: !!merged.image,
+                hasEdit: !!edit,
+                editHasQuestionImage: edit ? !!edit.questionImage : false,
+                editHasImage: edit ? !!edit.image : false,
+                finalImageUsed: !!q.image,
+                hasOptionImages: !!merged.optionImages,
+                optionImagesKeys: merged.optionImages ? Object.keys(merged.optionImages) : [],
+                rawImageFields: Object.keys(merged).filter((k) => k.toLowerCase().includes("image")),
+              })
+            })
+          }
+
+          console.log("[v0] Loaded", loadedQuestions.length, "Firebase questions for", categoryId)
+
+          // Group questions by reeks to create sets
+          const questionsByReeks: Record<string, typeof loadedQuestions> = {}
+          const originalReeksNames: Record<string, string> = {}
+
+          loadedQuestions.forEach((q) => {
+            const originalReeks = q.reeks || "1"
+            const normalizedReeks = normalizeReeks(originalReeks)
+
+            if (!questionsByReeks[normalizedReeks]) {
+              questionsByReeks[normalizedReeks] = []
+              // Store the first occurrence of the original name for display
+              originalReeksNames[normalizedReeks] = originalReeks
+            }
+            questionsByReeks[normalizedReeks].push(q)
+          })
+
+          console.log(
+            "[v0] Questions grouped by reeks:",
+            Object.keys(questionsByReeks).map((reeks) => ({
+              reeks,
+              originalName: originalReeksNames[reeks],
+              count: questionsByReeks[reeks].length,
+            })),
+          )
+
+          // Create question sets from reeks groups
+          const dynamicSets: QuestionSet[] = Object.entries(questionsByReeks).map(([normalizedReeks, questions]) => ({
+            id: `${category}-reeks-${normalizedReeks}`,
+            name: `Reeks ${originalReeksNames[normalizedReeks]}`,
+            description: `${questions.length} vragen`,
+            questions,
+          }))
+
+          console.log("[v0] Loaded question sets:", {
+            category,
+            firebaseQuestions: Object.keys(data).length,
+            deletedQuestions: deletedIds.length,
+            totalQuestions: loadedQuestions.length,
+            sets: dynamicSets.length,
+          })
+
+          setQuestionSets(dynamicSets.length > 0 ? dynamicSets : [])
+        }
+      } catch (error) {
+        console.error("[v0] Error loading questions:", error)
+        setQuestionSets([])
+      } finally {
+        setIsLoadingQuestions(false)
+      }
+    }
+
+    loadQuestions()
+  }, [category])
 
   useEffect(() => {
     if (onQuizStateChange) {
@@ -137,7 +305,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
   const loadSeriesAttempts = async () => {
     if (!username || isAnonymous) return
     try {
-      const attempts = await getSeriesAttempts(username)
+      const attempts = await getSeriesAttempts(username, category)
       setSeriesAttempts(attempts)
     } catch (error) {
       console.error("[v0] Error loading series attempts:", error)
@@ -146,22 +314,22 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
 
   const loadAllSeriesProgress = async () => {
     if (!username || isAnonymous) return
+
     try {
-      const allProgress = await getAllQuizProgress(username)
-      setSeriesProgress(allProgress)
+      const progress = await getAllQuizProgress(username, category)
+      setSeriesProgress(progress)
     } catch (error) {
       console.error("[v0] Error loading series progress:", error)
     }
   }
 
   const saveProgress = async () => {
-    if (!username || isAnonymous || !selectedSet) return
-    if (!answers || answers.length === 0) {
+    if (!username || !selectedSet || isAnonymous) {
       console.log("[v0] No progress to save")
       return
     }
     try {
-      const progressData = {
+      const progressData: QuizProgress = {
         username,
         setId: selectedSet.id,
         setName: selectedSet.name,
@@ -169,10 +337,10 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
         answers,
         shuffleQuestions: isShuffleQuestions,
         shuffleAnswers: isShuffleAnswers,
-        timestamp: Date.now(),
+        timestamp: new Date().toISOString(),
       }
 
-      await saveQuizProgress(progressData)
+      await saveQuizProgress(progressData, category)
 
       // Update local seriesProgress state immediately
       setSeriesProgress((prev) => ({
@@ -188,7 +356,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
     if (!username || isAnonymous) return
 
     try {
-      const incorrectIds = await getIncorrectQuestions(username)
+      const incorrectIds = await getIncorrectQuestions(username, category)
       setWrongAnswersCount(incorrectIds.length)
     } catch (error) {
       console.error("[v0] Error loading wrong answers:", error)
@@ -197,7 +365,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
 
   const handleStartFresh = () => {
     if (username && !isAnonymous && savedProgress?.setId) {
-      clearQuizProgress(username, savedProgress.setId)
+      clearQuizProgress(username, savedProgress.setId, category)
     }
     // Close the resume dialog and reset state
     setSavedProgress(null)
@@ -244,10 +412,10 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
 
       try {
         // Load incorrect question IDs
-        const incorrectIds = await getIncorrectQuestions(username)
+        const incorrectIds = await getIncorrectQuestions(username, category)
 
         // Get the actual questions using those IDs
-        const incorrectQuestions = getQuestionsByIds(incorrectIds)
+        const incorrectQuestions = getQuestionsByIds(incorrectIds, questionSets)
 
         setSelectedSet({
           id: "wrong-answers",
@@ -327,17 +495,33 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
     setAnswers(newAnswers)
 
     const currentQ = questions[currentQuestion]
-    const isCorrect = selectedAnswer === currentQ.correctAnswer
+    console.log("[v0] Answer comparison:", {
+      questionId: currentQ.id,
+      selectedAnswer: selectedAnswer,
+      selectedAnswerType: typeof selectedAnswer,
+      correctAnswer: currentQ.correctAnswer,
+      correctAnswerType: typeof currentQ.correctAnswer,
+      areEqual: selectedAnswer === currentQ.correctAnswer,
+      selectedAnswerUpperCase: selectedAnswer.toUpperCase(),
+      correctAnswerUpperCase: currentQ.correctAnswer?.toUpperCase?.(),
+      caseInsensitiveEqual: selectedAnswer.toUpperCase() === currentQ.correctAnswer?.toUpperCase(),
+    })
+    const isCorrect = selectedAnswer.toUpperCase() === currentQ.correctAnswer?.toUpperCase()
 
-    console.log("[v0] Question answered:", { currentQ, isCorrect, isWrongAnswersMode })
+    console.log("[v0] Question answered:", {
+      questionId: currentQ.id,
+      hasImage: !!currentQ.image,
+      isCorrect,
+      isWrongAnswersMode,
+    })
 
     try {
       if (isCorrect) {
         console.log("[v0] Removing correct answer from incorrect questions:", currentQ.id)
-        await removeIncorrectQuestion(username, currentQ.id)
+        await removeIncorrectQuestion(username, currentQ.id, category)
         await loadWrongAnswers()
       } else if (!isWrongAnswersMode) {
-        await addIncorrectQuestion(username, currentQ.id)
+        await addIncorrectQuestion(username, currentQ.id, category)
         await loadWrongAnswers()
       }
     } catch (error) {
@@ -362,7 +546,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
 
   const handleRestart = () => {
     if (username && !isAnonymous && selectedSet && !isWrongAnswersMode) {
-      clearQuizProgress(username, selectedSet.id)
+      clearQuizProgress(username, selectedSet.id, category)
     }
     setCurrentQuestion(0)
     setSelectedAnswer(null)
@@ -397,25 +581,30 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
       return
     }
 
-    const score = finalAnswers.filter((answer, idx) => answer === questions[idx].correctAnswer).length
+    const score = finalAnswers.filter(
+      (answer, idx) => answer?.toUpperCase() === questions[idx].correctAnswer?.toUpperCase(),
+    ).length
     const percentage = Math.round((score / questions.length) * 100)
 
     try {
-      await saveQuizResult({
-        username: username,
-        setId: selectedSet.id,
-        setName: selectedSet.name,
-        score,
-        totalQuestions: questions.length,
-        percentage,
-        answersGiven: finalAnswers,
-        correctAnswers: questions.map((q: any) => q.correctAnswer),
-        timestamp: Date.now(),
-        shuffleQuestions: isShuffleQuestions,
-        shuffleAnswers: isShuffleAnswers,
-      })
+      await saveQuizResult(
+        {
+          username: username,
+          setId: selectedSet.id,
+          setName: selectedSet.name,
+          score,
+          totalQuestions: questions.length,
+          percentage,
+          answersGiven: finalAnswers,
+          correctAnswers: questions.map((q: any) => q.correctAnswer),
+          timestamp: new Date().toISOString(),
+          shuffleQuestions: isShuffleQuestions,
+          shuffleAnswers: isShuffleAnswers,
+        },
+        category,
+      )
       console.log("[v0] Quiz result saved successfully")
-      await clearQuizProgress(username, selectedSet.id)
+      await clearQuizProgress(username, selectedSet.id, category)
       await loadSeriesAttempts()
       await loadWrongAnswers()
       await loadAllSeriesProgress()
@@ -437,52 +626,38 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
     onQuizStateChange?.(false)
   }
 
-  if (showResumeDialog && savedProgress) {
-    const progress = savedProgress
-    const totalQuestions = selectedSet?.questions.length || progress.answers?.length || 0
-    return (
-      <Card className="border-2 mx-auto mt-4 sm:mt-8">
-        <CardHeader className="text-center pb-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs sm:text-sm font-medium text-muted-foreground">
-              Vraag {progress.currentQuestion + 1} van {totalQuestions}
-            </span>
-          </div>
-          <Progress value={((progress.currentQuestion + 1) / totalQuestions) * 100} className="w-full" />
-          <h3 className="text-base sm:text-lg lg:text-xl leading-relaxed mt-4">{progress.setName}</h3>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="p-3 sm:p-4 rounded-lg bg-muted/50 space-y-2">
-            <p className="text-xs sm:text-sm">
-              <span className="font-medium">Reeks:</span> {progress.setName}
-            </p>
-            <p className="text-xs sm:text-sm">
-              <span className="font-medium">Voortgang:</span> {progress.currentQuestion + 1} van {totalQuestions} vragen
-              beantwoord
-            </p>
-            <p className="text-xs sm:text-sm text-muted-foreground">
-              Laatst opgeslagen: {new Date(progress.timestamp).toLocaleString("nl-NL")}
-            </p>
-          </div>
-        </CardContent>
-        <CardFooter className="flex flex-col gap-2 pt-4">
-          <Button onClick={handleResumeProgress} className="w-full">
-            Doorgaan
-          </Button>
-          <Button onClick={handleStartFresh} variant="outline" className="w-full bg-transparent">
-            Opnieuw Beginnen
-          </Button>
-          <Button onClick={handleCancelResume} variant="outline" className="w-full bg-transparent">
-            Terug
-          </Button>
-        </CardFooter>
-      </Card>
-    )
+  const handleStartSet = async (set: QuestionSet) => {
+    if (!username || isAnonymous) return
+
+    try {
+      const savedProgress = await getQuizProgress(username, set.id, category)
+
+      if (savedProgress) {
+        setResumeSetId(set.id)
+        setShowResumeDialog(true)
+        setSelectedSet(set)
+        setSavedProgress(savedProgress)
+      } else {
+        setSelectedSet(set)
+      }
+    } catch (error) {
+      console.error("[v0] Error loading quiz progress:", error)
+    }
   }
 
-  if (!selectedSet) {
+  const renderSetSelection = () => {
+    if (isLoadingQuestions) {
+      return (
+        <Card className="w-full">
+          <CardHeader>
+            <CardTitle className="text-center text-xl sm:text-2xl">Vragen laden...</CardTitle>
+          </CardHeader>
+        </Card>
+      )
+    }
+
     return (
-      <Card className="border-2">
+      <Card className="w-full">
         <CardHeader className="text-center pb-4">
           <h3 className="text-base sm:text-lg lg:text-xl leading-relaxed">Kies een vragenreeks</h3>
         </CardHeader>
@@ -543,6 +718,64 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
     )
   }
 
+  const normalizeReeks = (reeks: string | number | undefined): string => {
+    if (!reeks) return "1"
+    const reeksStr = String(reeks).toLowerCase()
+    const cleaned = reeksStr
+      .replace(/^.*-reeks-/, "")
+      .replace(/^reeks-?/, "")
+      .replace(/^set-?/, "")
+      .trim()
+    return cleaned || "1"
+  }
+
+  if (showResumeDialog && savedProgress) {
+    const progress = savedProgress
+    const totalQuestions = selectedSet?.questions.length || progress.answers?.length || 0
+    return (
+      <Card className="border-2 mx-auto mt-4 sm:mt-8">
+        <CardHeader className="text-center pb-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs sm:text-sm font-medium text-muted-foreground">
+              Vraag {progress.currentQuestion + 1} van {totalQuestions}
+            </span>
+          </div>
+          <Progress value={((progress.currentQuestion + 1) / totalQuestions) * 100} className="w-full" />
+          <h3 className="text-base sm:text-lg lg:text-xl leading-relaxed mt-4">{progress.setName}</h3>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-3 sm:p-4 rounded-lg bg-muted/50 space-y-2">
+            <p className="text-xs sm:text-sm">
+              <span className="font-medium">Reeks:</span> {progress.setName}
+            </p>
+            <p className="text-xs sm:text-sm">
+              <span className="font-medium">Voortgang:</span> {progress.currentQuestion + 1} van {totalQuestions} vragen
+              beantwoord
+            </p>
+            <p className="text-xs sm:text-sm text-muted-foreground">
+              Laatst opgeslagen: {new Date(progress.timestamp).toLocaleString("nl-NL")}
+            </p>
+          </div>
+        </CardContent>
+        <CardFooter className="flex flex-col gap-2 pt-4">
+          <Button onClick={handleResumeProgress} className="w-full">
+            Doorgaan
+          </Button>
+          <Button onClick={handleStartFresh} variant="outline" className="w-full bg-transparent">
+            Opnieuw Beginnen
+          </Button>
+          <Button onClick={handleCancelResume} variant="outline" className="w-full bg-transparent">
+            Terug
+          </Button>
+        </CardFooter>
+      </Card>
+    )
+  }
+
+  if (!selectedSet) {
+    return renderSetSelection()
+  }
+
   const selectedSetId = selectedSet?.id
   const selectedSetDetails = questionSets.find((set: QuestionSet) => set.id === selectedSetId) || questionSets[0]
 
@@ -597,7 +830,9 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
   }
 
   if (showResult) {
-    const score = answers.filter((answer, idx) => answer === questions[idx].correctAnswer).length
+    const score = answers.filter(
+      (answer, idx) => answer?.toUpperCase() === questions[idx].correctAnswer?.toUpperCase(),
+    ).length
     const percentage = Math.round((score / questions.length) * 100)
     const hasNextSet =
       !isWrongAnswersMode && selectedSet
@@ -630,8 +865,10 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
             <h3 className="font-semibold text-base sm:text-lg mb-3">Overzicht antwoorden:</h3>
             {questions.map((q: any, idx: number) => {
               const userAnswer = answers[idx]
-              const isCorrectAnswer = userAnswer === q.correctAnswer
-              const correctAnswerText = q.options.find((opt: any) => opt.label === q.correctAnswer)?.text
+              const isCorrectAnswer = userAnswer?.toUpperCase() === q.correctAnswer?.toUpperCase()
+              const correctAnswerText = q.options.find(
+                (opt: any) => opt.label?.toUpperCase() === q.correctAnswer?.toUpperCase(),
+              )?.text
 
               return (
                 <div
@@ -652,6 +889,18 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm sm:text-base font-medium mb-1">Vraag {idx + 1}</p>
                       <p className="text-sm sm:text-base leading-relaxed">{q.question}</p>
+                      {q.image && (
+                        <div className="mt-3 mb-2">
+                          <img
+                            src={q.image || "/placeholder.svg"}
+                            alt="Vraag afbeelding"
+                            className="max-w-full sm:max-w-xs h-auto max-h-32 sm:max-h-48 object-contain rounded border"
+                            onError={(e) => {
+                              e.currentTarget.style.display = "none"
+                            }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                   {!isCorrectAnswer && (
@@ -660,18 +909,64 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
                         <XCircle className="w-4 h-4 sm:w-5 sm:h-5 text-destructive mt-0.5 flex-shrink-0" />
                         <div>
                           <span className="font-medium">Jouw antwoord:</span>
-                          <p className="text-muted-foreground">
-                            {userAnswer}) {q.options.find((opt: any) => opt.label === userAnswer)?.text}
-                          </p>
+                          {(() => {
+                            const userOption = q.options.find((opt: any) => opt.label === userAnswer)
+                            if (!userOption) return <p className="text-muted-foreground">Niet beantwoord</p>
+
+                            if (userOption.image) {
+                              return (
+                                <div className="mt-2">
+                                  <p className="text-muted-foreground mb-1">{userAnswer})</p>
+                                  <img
+                                    src={userOption.image || "/placeholder.svg"}
+                                    alt={`Antwoord ${userAnswer}`}
+                                    className="max-w-full sm:max-w-xs h-auto max-h-32 object-contain rounded border"
+                                    onError={(e) => {
+                                      e.currentTarget.style.display = "none"
+                                    }}
+                                  />
+                                </div>
+                              )
+                            }
+                            return (
+                              <p className="text-muted-foreground">
+                                {userAnswer}) {userOption.text}
+                              </p>
+                            )
+                          })()}
                         </div>
                       </div>
                       <div className="flex items-start gap-2 sm:gap-3">
                         <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-success mt-0.5 flex-shrink-0" />
                         <div>
                           <span className="font-medium">Correct antwoord:</span>
-                          <p className="text-muted-foreground">
-                            {q.correctAnswer}) {correctAnswerText}
-                          </p>
+                          {(() => {
+                            const correctOption = q.options.find(
+                              (opt: any) => opt.label?.toUpperCase() === q.correctAnswer?.toUpperCase(),
+                            )
+                            if (!correctOption) return <p className="text-muted-foreground">Antwoord niet gevonden</p>
+
+                            if (correctOption.image) {
+                              return (
+                                <div className="mt-2">
+                                  <p className="text-muted-foreground mb-1">{q.correctAnswer?.toUpperCase()})</p>
+                                  <img
+                                    src={correctOption.image || "/placeholder.svg"}
+                                    alt={`Correct antwoord ${q.correctAnswer}`}
+                                    className="max-w-full sm:max-w-xs h-auto max-h-32 object-contain rounded border"
+                                    onError={(e) => {
+                                      e.currentTarget.style.display = "none"
+                                    }}
+                                  />
+                                </div>
+                              )
+                            }
+                            return (
+                              <p className="text-muted-foreground">
+                                {q.correctAnswer?.toUpperCase()}) {correctOption.text || "Antwoord niet gevonden"}
+                              </p>
+                            )
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -679,9 +974,31 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
                   {isCorrectAnswer && (
                     <div className="ml-8 sm:ml-10 text-sm sm:text-base">
                       <span className="font-medium text-success">Correct!</span>
-                      <p className="text-muted-foreground">
-                        {userAnswer}) {q.options.find((opt: any) => opt.label === userAnswer)?.text}
-                      </p>
+                      {(() => {
+                        const userOption = q.options.find((opt: any) => opt.label === userAnswer)
+                        if (!userOption) return null
+
+                        if (userOption.image) {
+                          return (
+                            <div className="mt-2">
+                              <p className="text-muted-foreground mb-1">{userAnswer})</p>
+                              <img
+                                src={userOption.image || "/placeholder.svg"}
+                                alt={`Antwoord ${userAnswer}`}
+                                className="max-w-full sm:max-w-xs h-auto max-h-32 object-contain rounded border"
+                                onError={(e) => {
+                                  e.currentTarget.style.display = "none"
+                                }}
+                              />
+                            </div>
+                          )
+                        }
+                        return (
+                          <p className="text-muted-foreground">
+                            {userAnswer}) {userOption.text}
+                          </p>
+                        )
+                      })()}
                     </div>
                   )}
                 </div>
@@ -714,33 +1031,39 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
         </div>
         <Progress value={((currentQuestion + 1) / questions.length) * 100} className="w-full" />
         <h3 className="text-base sm:text-lg lg:text-xl leading-relaxed mt-4">{questions[currentQuestion].question}</h3>
-        {questions[currentQuestion].image ? (
+        {questions[currentQuestion].image && (
           <div className="mt-3 sm:mt-4 p-3 sm:p-4 bg-muted rounded-lg border">
             <img
               src={questions[currentQuestion].image || "/placeholder.svg"}
               alt="Vraag afbeelding"
               className="max-w-full sm:max-w-xs h-auto mx-auto max-h-24 sm:max-h-32 object-contain"
+              onError={(e) => {
+                console.error(
+                  "[v0] Failed to load question image:",
+                  questions[currentQuestion].image?.substring(0, 100),
+                )
+                e.currentTarget.style.display = "none"
+              }}
             />
           </div>
-        ) : (
-          questions[currentQuestion].hasImage && (
-            <div className="mt-3 sm:mt-4 p-2.5 sm:p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-              <p className="text-xs sm:text-sm text-amber-900 dark:text-amber-100 font-medium">
-                ⚠️ Deze vraag bevat een afbeelding of symbool die momenteel niet beschikbaar is.
+        )}
+        {questions[currentQuestion].hasImage && (
+          <div className="mt-3 sm:mt-4 p-2.5 sm:p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+            <p className="text-xs sm:text-sm text-amber-900 dark:text-amber-100 font-medium">
+              ⚠️ Deze vraag bevat een afbeelding of symbool die momenteel niet beschikbaar is.
+            </p>
+            {questions[currentQuestion].imageNote && (
+              <p className="text-xs sm:text-sm text-amber-700 dark:text-amber-300 mt-1">
+                {questions[currentQuestion].imageNote}
               </p>
-              {questions[currentQuestion].imageNote && (
-                <p className="text-xs sm:text-sm text-amber-700 dark:text-amber-300 mt-1">
-                  {questions[currentQuestion].imageNote}
-                </p>
-              )}
-            </div>
-          )
+            )}
+          </div>
         )}
       </CardHeader>
       <CardContent className="space-y-2 sm:space-y-3">
         {questions[currentQuestion].options.map((option: any) => {
           const isSelected = selectedAnswer === option.label
-          const hasImageAnswer = questions[currentQuestion].optionImages?.[option.label as "a" | "b" | "c"]
+          const hasImageAnswer = option.image
 
           return (
             <button
@@ -762,17 +1085,20 @@ export default function Quiz({ onQuizComplete, onQuizStateChange }: QuizProps) {
                 >
                   {option.label}
                 </span>
-                {hasImageAnswer ? (
+                {hasImageAnswer && (
                   <div className="p-3 sm:p-4 rounded-lg border">
                     <img
-                      src={hasImageAnswer || "/placeholder.svg"}
+                      src={option.image || "/placeholder.svg"}
                       alt={`Antwoord ${option.label}`}
                       className="max-w-full sm:max-w-xs h-auto mx-auto max-h-24 sm:max-h-32 object-contain"
+                      onError={(e) => {
+                        console.error("[v0] Failed to load answer image for option:", option.label)
+                        e.currentTarget.style.display = "none"
+                      }}
                     />
                   </div>
-                ) : (
-                  <span className="text-base sm:text-lg">{option.text}</span>
                 )}
+                {!hasImageAnswer && <span className="text-base sm:text-lg">{option.text}</span>}
               </div>
             </button>
           )
