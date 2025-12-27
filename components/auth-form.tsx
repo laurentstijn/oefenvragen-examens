@@ -158,6 +158,8 @@ export function AuthForm() {
             <Input
               id="username"
               type="text"
+              name="username"
+              autoComplete="username"
               placeholder="Jouw gebruikersnaam"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -170,6 +172,8 @@ export function AuthForm() {
             <Input
               id="password"
               type="password"
+              name="password"
+              autoComplete={isNewUser ? "new-password" : "current-password"}
               placeholder="Minimaal 6 tekens"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -179,7 +183,7 @@ export function AuthForm() {
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
         </CardContent>
-        <CardFooter className="flex flex-col gap-3">
+        <CardFooter className="flex flex-col gap-3 mt-6">
           <Button type="submit" className="w-full" size="lg" disabled={loading}>
             {loading ? (
               "Bezig..."
