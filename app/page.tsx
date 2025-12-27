@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { getCategoryById } from "@/lib/categories-data"
 import type { Category } from "@/lib/categories-data"
+import { checkAdminAccess } from "@/lib/firebase-service"
 
 export default function Page() {
   const { username, email, loading, isAnonymous, signOut } = useAuth()
@@ -18,7 +19,7 @@ export default function Page() {
   const [isQuizActive, setIsQuizActive] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [currentCategory, setCurrentCategory] = useState<Category | null>(null)
-  const showAdminButton = email && !isAnonymous
+  const [isAdmin, setIsAdmin] = useState(false)
 
   useEffect(() => {
     const loadCategory = async () => {
@@ -31,6 +32,18 @@ export default function Page() {
     }
     loadCategory()
   }, [selectedCategory])
+
+  useEffect(() => {
+    const checkAdmin = async () => {
+      if (email && !isAnonymous) {
+        const adminStatus = await checkAdminAccess(email)
+        setIsAdmin(adminStatus)
+      } else {
+        setIsAdmin(false)
+      }
+    }
+    checkAdmin()
+  }, [email, isAnonymous])
 
   const handleQuizComplete = () => {
     console.log("[v0] Quiz completed, refreshing stats")
@@ -70,7 +83,7 @@ export default function Page() {
           <h1 className="text-lg font-bold text-foreground text-center">{getCategoryTitle()}</h1>
           {!selectedCategory && username && !isAnonymous && (
             <div className="absolute right-0 top-0 flex gap-2">
-              {showAdminButton && (
+              {isAdmin && (
                 <Link href="/admin">
                   <Button variant="outline" size="sm" className="gap-2 bg-transparent">
                     <Settings className="w-4 h-4" />

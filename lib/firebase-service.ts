@@ -488,21 +488,29 @@ export async function updateLastActive(username: string): Promise<void> {
   }
 }
 
-const HARDCODED_ADMIN_EMAILS = ["laurentstijn@gmail.com"]
-
 export async function checkAdminAccess(email: string): Promise<boolean> {
   try {
-    if (HARDCODED_ADMIN_EMAILS.includes(email.toLowerCase())) {
-      console.log("[v0] Admin access granted via hardcoded list:", email)
-      return true
+    const encodedEmail = email.replace(/\./g, ",")
+    const adminRef = ref(db, `admins/${encodedEmail}`)
+    console.log("[v0] Checking admin access for email:", email)
+    console.log("[v0] Encoded Firebase key:", encodedEmail)
+
+    const snapshot = await get(adminRef)
+    console.log("[v0] Firebase snapshot exists:", snapshot.exists())
+    console.log("[v0] Firebase snapshot value:", snapshot.val())
+
+    const isAdmin = snapshot.exists() && snapshot.val() === true
+
+    if (isAdmin) {
+      console.log("[v0] Admin access granted from Firebase:", email)
+    } else {
+      console.log("[v0] Admin access denied for:", email)
     }
 
-    const adminRef = ref(db, `admins/${email.replace(/\./g, ",")}`)
-    const snapshot = await get(adminRef)
-    return snapshot.exists() && snapshot.val() === true
+    return isAdmin
   } catch (error) {
     console.error("[v0] Error checking admin access from database:", error)
-    return HARDCODED_ADMIN_EMAILS.includes(email.toLowerCase())
+    return false
   }
 }
 
@@ -544,11 +552,6 @@ export async function getAllAdminEmails(): Promise<string[]> {
 
 export async function initializeFirstAdmin(email: string): Promise<boolean> {
   try {
-    if (HARDCODED_ADMIN_EMAILS.includes(email.toLowerCase())) {
-      console.log("[v0] User is hardcoded admin, skipping database initialization")
-      return true
-    }
-
     const adminsRef = ref(db, "admins")
     const snapshot = await get(adminsRef)
 
@@ -562,7 +565,7 @@ export async function initializeFirstAdmin(email: string): Promise<boolean> {
     return false
   } catch (error) {
     console.error("[v0] Error initializing first admin:", error)
-    return HARDCODED_ADMIN_EMAILS.includes(email.toLowerCase())
+    return false
   }
 }
 
@@ -1211,7 +1214,7 @@ export async function deleteSeriesFromCategory(
     return { success: true, deletedCount }
   } catch (error) {
     console.error("[v0] Error deleting series:", error)
-    throw error
+    return { success: false, deletedCount: 0 }
   }
 }
 
@@ -1258,6 +1261,6 @@ export async function renameCategoryId(
     return { success: true, movedQuestionsCount: movedCount }
   } catch (error) {
     console.error("[v0] Error renaming category ID:", error)
-    throw error
+    return { success: false, movedQuestionsCount: 0 }
   }
 }
