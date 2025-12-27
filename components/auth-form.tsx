@@ -1,6 +1,8 @@
 "use client"
 
 import type React from "react"
+import { ref as refDB, set, get } from "firebase/database"
+import { db } from "@/lib/firebase"
 
 import { useState } from "react"
 import { useAuth } from "@/contexts/auth-context"
@@ -74,7 +76,16 @@ export function AuthForm() {
     }
   }
 
-  const handleAnonymous = () => {
+  const handleAnonymous = async () => {
+    try {
+      const counterRef = refDB(db, "analytics/anonymousClicks")
+      const snapshot = await get(counterRef)
+      const currentCount = snapshot.exists() ? snapshot.val() : 0
+      await set(counterRef, currentCount + 1)
+    } catch (error) {
+      console.error("[v0] Failed to track anonymous usage:", error)
+    }
+
     signInAnonymously()
   }
 

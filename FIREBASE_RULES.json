@@ -12,6 +12,10 @@
         }
       }
     },
+    "analytics": {
+      ".read": "true",
+      ".write": "true"
+    },
     "questionEdits": {
       ".read": "true",
       ".write": "true",

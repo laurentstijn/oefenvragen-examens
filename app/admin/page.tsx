@@ -220,10 +220,9 @@ export default function AdminPage() {
 
   const [userStats, setUserStats] = useState({
     totalUsers: 0,
-    anonymousUsers: 0,
     totalQuizResults: 0,
     recentActiveUsers: 0,
-    anonymousQuizResults: 0,
+    anonymousClicks: 0, // Added counter for anonymous button clicks
   })
   const [isLoadingStats, setIsLoadingStats] = useState(true)
   const [isExporting, setIsExporting] = useState(false) // NEW: State for export button
@@ -231,16 +230,18 @@ export default function AdminPage() {
   const loadUserStatistics = useCallback(async () => {
     setIsLoadingStats(true)
     try {
+      const clicksRef = refDB(db, "analytics/anonymousClicks")
+      const clicksSnapshot = await get(clicksRef)
+      const anonymousClicks = clicksSnapshot.exists() ? clicksSnapshot.val() : 0
+
       const usersRef = refDB(db, "users")
       const snapshot = await get(usersRef)
 
       if (snapshot.exists()) {
         const users = snapshot.val()
         let totalUsers = 0
-        let anonymousUsers = 0
         let totalQuizResults = 0
         let recentActiveUsers = 0
-        let anonymousQuizResults = 0
 
         const now = Date.now()
         const oneDayAgo = now - 24 * 60 * 60 * 1000
@@ -248,23 +249,10 @@ export default function AdminPage() {
         Object.entries(users).forEach(([userId, userData]: [string, any]) => {
           totalUsers++
 
-          // Check if anonymous (username contains "Anoniem" or "anonymous")
-          const isAnonymous =
-            userData.username?.toLowerCase().includes("anoniem") ||
-            userData.username?.toLowerCase().includes("anonymous") ||
-            userId.includes("anon")
-
-          if (isAnonymous) {
-            anonymousUsers++
-          }
-
           // Count quiz results
           if (userData.quizResults) {
             const quizCount = Object.keys(userData.quizResults).length
             totalQuizResults += quizCount
-            if (isAnonymous) {
-              anonymousQuizResults += quizCount
-            }
           }
 
           // Check if active in last 24 hours
@@ -279,10 +267,16 @@ export default function AdminPage() {
 
         setUserStats({
           totalUsers,
-          anonymousUsers,
           totalQuizResults,
           recentActiveUsers,
-          anonymousQuizResults,
+          anonymousClicks,
+        })
+      } else {
+        setUserStats({
+          totalUsers: 0,
+          totalQuizResults: 0,
+          recentActiveUsers: 0,
+          anonymousClicks,
         })
       }
     } catch (error) {
@@ -2570,41 +2564,36 @@ export default function AdminPage() {
           </div>
         </div>
 
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle>Gebruikersstatistieken</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoadingStats ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                <div className="p-4 rounded-lg border bg-card">
-                  <div className="text-2xl font-bold text-foreground">{userStats.totalUsers}</div>
-                  <div className="text-sm text-muted-foreground">Totaal Gebruikers</div>
-                </div>
-                <div className="p-4 rounded-lg border bg-card">
-                  <div className="text-2xl font-bold text-foreground">{userStats.anonymousUsers}</div>
-                  <div className="text-sm text-muted-foreground">Anonieme Gebruikers</div>
-                </div>
-                <div className="p-4 rounded-lg border bg-card">
-                  <div className="text-2xl font-bold text-foreground">{userStats.anonymousQuizResults}</div>
-                  <div className="text-sm text-muted-foreground">Anoniem Gebruik</div>
-                </div>
-                <div className="p-4 rounded-lg border bg-card">
-                  <div className="text-2xl font-bold text-foreground">{userStats.totalQuizResults}</div>
-                  <div className="text-sm text-muted-foreground">Totaal Quiz Resultaten</div>
-                </div>
-                <div className="p-4 rounded-lg border bg-card">
-                  <div className="text-2xl font-bold text-foreground">{userStats.recentActiveUsers}</div>
-                  <div className="text-sm text-muted-foreground">Actief (laatste 24u)</div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* User Statistics */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold mb-4">Gebruikersstatistieken</h2>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-4xl font-bold">{userStats.totalUsers}</CardTitle>
+                <CardDescription>Totaal Gebruikers</CardDescription>
+              </CardHeader>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-4xl font-bold">{userStats.anonymousClicks || 0}</CardTitle>
+                <CardDescription>Anoniem Gebruik</CardDescription>
+              </CardHeader>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-4xl font-bold">{userStats.totalQuizResults}</CardTitle>
+                <CardDescription>Totaal Quiz Resultaten</CardDescription>
+              </CardHeader>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-4xl font-bold">{userStats.recentActiveUsers}</CardTitle>
+                <CardDescription>Actief (laatste 24u)</CardDescription>
+              </CardHeader>
+            </Card>
+          </div>
+        </div>
 
         <Card className="mb-8">
           <CardHeader>
