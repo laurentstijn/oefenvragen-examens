@@ -11,6 +11,7 @@ import Link from "next/link"
 import { getCategoryById } from "@/lib/categories-data"
 import type { Category } from "@/lib/categories-data"
 import { checkAdminAccess } from "@/lib/firebase-service"
+import { InstallInstructions } from "@/components/install-instructions"
 
 export default function Page() {
   const { username, email, loading, isAnonymous, signOut } = useAuth()
@@ -116,7 +117,10 @@ export default function Page() {
               </div>
             )}
             {!selectedCategory ? (
-              <CategorySelector onSelectCategory={handleCategorySelect} />
+              <>
+                <InstallInstructions />
+                <CategorySelector onSelectCategory={handleCategorySelect} />
+              </>
             ) : (
               <>
                 <div className="mb-3">

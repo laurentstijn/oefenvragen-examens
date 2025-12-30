@@ -22,10 +22,7 @@
     },
     "questionEdits": {
       ".read": "true",
-      ".write": "true",
-      "$editKey": {
-        ".validate": "newData.hasChildren(['correct', 'timestamp'])"
-      }
+      ".write": "true"
     },
     "questions": {
       ".read": "true",
