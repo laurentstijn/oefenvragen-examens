@@ -18,6 +18,7 @@ export function UserStatsPanel({ refreshTrigger, onDataReset, category = "radar"
   const [stats, setStats] = useState<UserStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [resetting, setResetting] = useState(false)
+  const [isNewUser, setIsNewUser] = useState(false)
 
   useEffect(() => {
     if (username) {
@@ -33,6 +34,7 @@ export function UserStatsPanel({ refreshTrigger, onDataReset, category = "radar"
       const userStats = await getUserStats(username, category)
       console.log("[v0] User stats loaded:", userStats)
       setStats(userStats)
+      setIsNewUser(userStats.totalQuizzes === 0)
     } catch (error) {
       console.error("[v0] Error loading stats:", error)
     } finally {
@@ -70,7 +72,9 @@ export function UserStatsPanel({ refreshTrigger, onDataReset, category = "radar"
     <Card className="border-2 mb-2 sm:mb-4">
       <CardHeader className="pb-2 sm:pb-4">
         <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-base sm:text-lg lg:text-xl">Welkom terug, {username}!</CardTitle>
+          <CardTitle className="text-base sm:text-lg lg:text-xl">
+            {isNewUser ? `Welkom, ${username}!` : `Welkom terug, ${username}!`}
+          </CardTitle>
           <div className="flex gap-1 sm:gap-2">
             <Button
               variant="outline"
