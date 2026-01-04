@@ -1978,32 +1978,8 @@ export const radarQuestionSets: QuestionSet[] = [
 
 export const questionSets = radarQuestionSets
 
-import { getQuestionEdits } from "./firebase-service"
-
 export async function getAllQuestionsWithEdits(): Promise<Question[]> {
-  try {
-    const edits = await getQuestionEdits()
-    const allQuestions = radarQuestionSets.flatMap((set) => set.questions)
-
-    return allQuestions.map((q) => {
-      const edit = edits.get(q.id)
-      if (!edit) return q
-
-      return {
-        ...q,
-        question: edit.question || q.question,
-        options: {
-          a: edit.options?.a || q.options.a,
-          b: edit.options?.b || q.options.b,
-          c: edit.options?.c || q.options.c,
-        },
-        correct: edit.correct || q.correct,
-      }
-    })
-  } catch (error) {
-    console.error("[v0] Failed to load edits, using original questions:", error)
-    return radarQuestionSets.flatMap((set) => set.questions)
-  }
+  return radarQuestionSets.flatMap((set) => set.questions)
 }
 
 export function getQuestionsByIds(ids: number[]): Question[] {

@@ -174,12 +174,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
           })
         }
 
-        // Load questionEdits overlay
-        const editsRef = ref(db, "questionEdits")
-        const editsSnapshot = await get(editsRef)
-        const questionEdits: Record<string, any> = editsSnapshot.exists() ? editsSnapshot.val() : {}
-        console.log("[v0] Loaded", Object.keys(questionEdits).length, "question edits from Firebase")
-
         const questionsRef = ref(db, `questions/${categoryId}`)
         const snapshot = await get(questionsRef)
         if (snapshot.exists()) {
@@ -187,19 +181,14 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
           const loadedQuestions = Object.entries(data)
             .filter(([key]) => !deletedIds.includes(key))
             .map(([key, q]) => {
-              // Merge edits if they exist for this question
-              const editKey = key // key format is already "category-id"
-              const edit = questionEdits[editKey]
-              const mergedQuestion = edit ? { ...q, ...edit } : q
-
               return {
                 id: key,
-                question: mergedQuestion.question,
-                options: mergedQuestion.options,
-                correctAnswer: mergedQuestion.correctAnswer || mergedQuestion.correct,
-                image: mergedQuestion.questionImage || mergedQuestion.image || null,
-                optionImages: mergedQuestion.optionImages || null,
-                reeks: mergedQuestion.reeks || "1",
+                question: q.question,
+                options: q.options,
+                correctAnswer: q.correctAnswer || q.correct,
+                image: q.questionImage || q.image || null,
+                optionImages: q.optionImages || null,
+                reeks: q.reeks || "1",
               }
             })
 
@@ -208,20 +197,15 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
             console.log("[v0] Test reeks questions found:", testReeksQuestions.length)
             testReeksQuestions.forEach((q, index) => {
               const rawQ = data[q.id]
-              const edit = questionEdits[q.id]
-              const merged = edit ? { ...rawQ, ...edit } : rawQ
               console.log(`[v0] Test reeks question ${index + 1}:`, {
                 id: q.id,
                 question: q.question.substring(0, 50),
-                hasQuestionImage: !!merged.questionImage,
-                hasImage: !!merged.image,
-                hasEdit: !!edit,
-                editHasQuestionImage: edit ? !!edit.questionImage : false,
-                editHasImage: edit ? !!edit.image : false,
+                hasQuestionImage: !!rawQ.questionImage,
+                hasImage: !!rawQ.image,
                 finalImageUsed: !!q.image,
-                hasOptionImages: !!merged.optionImages,
-                optionImagesKeys: merged.optionImages ? Object.keys(merged.optionImages) : [],
-                rawImageFields: Object.keys(merged).filter((k) => k.toLowerCase().includes("image")),
+                hasOptionImages: !!rawQ.optionImages,
+                optionImagesKeys: rawQ.optionImages ? Object.keys(rawQ.optionImages) : [],
+                rawImageFields: Object.keys(rawQ).filter((k) => k.toLowerCase().includes("image")),
               })
             })
           }

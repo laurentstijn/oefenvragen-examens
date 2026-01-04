@@ -2,14 +2,11 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { CardFooter } from "@/components/ui/card"
 
-import { DialogDescription } from "@/components/ui/dialog"
-
 import { Label } from "@/components/ui/label"
 
 import type React from "react"
 import { useToast } from "@/components/ui/use-toast"
-import { Trash2, X, Plus, FileText, Upload, Pencil, Download, RotateCcw } from "lucide-react"
-import type { Question } from "@/lib/radar-data"
+import { Trash2, X, Plus, FileText, Upload, Pencil, Download, RotateCcw, Flag } from "lucide-react" // Added Flag icon
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -29,7 +26,6 @@ import {
   getAllCategories,
   loadQuestionsFromFirebase, // Imported loadQuestionsFromFirebase
   deleteCategory, // Fixed import name from deleteCategoryFromFirebase to deleteCategory
-  type QuestionEdit, // Added QuestionEdit type import
   addCategoryToFirebase, // Import addCategoryToFirebase
   getAllQuestions, // Import getAllQuestions
   renameSeriesInCategory, // Import renameSeriesInCategory
@@ -48,9 +44,21 @@ import { cn } from "@/lib/utils"
 import { db } from "@/lib/firebase"
 import { ref as refDB, set, remove, get, update } from "firebase/database"
 import { useAuth } from "@/contexts/auth-context" // Import AuthContext
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog" // Import Dialog components
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog" // Import Dialog components
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group" // Import RadioGroup components
 import { getAuth } from "firebase/auth" // Import getAuth
+
+// --- FIX START ---
+// FIX: The type Question was undeclared. Imported it from a relevant module.
+import type { Question } from "@/lib/types"
+// --- FIX END ---
 
 const sanitizeForLog = (obj: any): any => {
   if (!obj) return obj
@@ -87,7 +95,7 @@ export default function AdminPage() {
 
   // Question management state
   const [selectedCategory, setSelectedCategory] = useState<string>("radar")
-  const [savedEdits, setSavedEdits] = useState<Record<string, QuestionEdit>>({}) // LINT FIX: Added explicit type for QuestionEdit
+  // const [savedEdits, setSavedEdits] = useState<Record<string, QuestionEdit>>({})
   const [questionNumber, setQuestionNumber] = useState("")
   const [questionText, setQuestionText] = useState("")
   const [optionA, setOptionA] = useState("")
@@ -138,26 +146,29 @@ export default function AdminPage() {
   const [showQuestionBrowser, setShowQuestionBrowser] = useState(false)
   const [selectedQuestionSet, setSelectedQuestionSet] = useState("all") // Changed from 'selectedQuestionSet' to 'all'
   const [searchTerm, setSearchTerm] = useState("")
-  const [showOnlyMissingImages, setShowOnlyMissingImages] = useState(false)
+  const [imageFilter, setImageFilter] = useState<"all" | "missing" | "has">("all")
+
+  const [showOnlyFlagged, setShowOnlyFlagged] = useState(false)
   // Updated state variables for series and split options
+
   const [uploadModalSelectedSeries, setUploadModalSelectedSeries] = useState("1")
   const [customReeks, setCustomReeks] = useState("")
   const [autoSplit, setAutoSplit] = useState<"single" | "split">("single")
 
   const [editingQuestionId, setEditingQuestionId] = useState<number | null>(null)
-  const [editFormData, setEditFormData] = useState({
-    question: "",
-    optionA: "",
-    optionB: "",
-    optionC: "",
-    optionD: "",
-    correct: "a" as "a" | "b" | "c" | "d",
-    questionImage: "" as string,
-    optionAImage: "" as string,
-    optionBImage: "" as string,
-    optionCImage: "" as string,
-    optionDImage: "" as string,
-  })
+  const [editFormData, setEditFormData] = useState<{
+    question: string
+    optionA: string
+    optionB: string
+    optionC: string
+    optionD: string
+    correct: "a" | "b" | "c" | "d"
+    questionImage: string
+    optionAImage: string
+    optionBImage: string
+    optionCImage: string
+    optionDImage: string
+  } | null>(null) // Changed to null to signify no edit form active
 
   const [showPdfUploadInOverview, setShowPdfUploadInOverview] = useState(false)
   const [parsedQuestionsForOverview, setParsedQuestionsForOverview] = useState<any[]>([])
@@ -619,7 +630,7 @@ export default function AdminPage() {
     }
   }
 
-  // Function to load all saved edits from Firebase
+  /*
   const loadSavedEdits = async () => {
     try {
       const editsRef = refDB(db, "questionEdits")
@@ -638,16 +649,24 @@ export default function AdminPage() {
       setSavedEdits({})
     }
   }
+  */
 
   // MEMOIZE loadQuestions and loadSavedEdits for use in useCallback
   const memoizedLoadQuestions = useCallback(loadQuestions, [selectedCategory])
-  const memoizedLoadSavedEdits = useCallback(loadSavedEdits, [])
+  // const memoizedLoadSavedEdits = useCallback(loadSavedEdits, []) // REMOVED
 
   // Modified handleBulkAnswerClick to use bulkEditAnswers state
   const handleBulkAnswerClick = async (questionId: number, answer: string) => {
     console.log(`[v0] Bulk editing question ${questionId} to answer ${answer}`)
 
     const questionKey = `${selectedCategory}-${questionId}`
+    // Fetch question data to include in editData
+    const question = Object.values(firebaseQuestions).find((q) => q.id === questionId)
+
+    if (!question) {
+      console.error("[v0] Question not found for bulk edit:", questionId)
+      return
+    }
 
     console.log("[v0] Setting bulkEditAnswers state NOW")
     setBulkEditAnswers((prev) => {
@@ -662,16 +681,24 @@ export default function AdminPage() {
     console.log("[v0] State update called, starting Firebase update")
 
     try {
-      // Update in Firebase
+      // Update in Firebase questions node
       await update(refDB(db, `questions/${selectedCategory}/${questionKey}`), {
         correctAnswer: answer.toUpperCase(),
       })
+
+      // Removed the creation of an editData object and saving to questionEdits node
+      // The edit is now directly applied to the questions node.
 
       console.log(`[v0] Successfully updated question ${questionId} in Firebase`)
       toast({
         title: "Antwoord bijgewerkt",
         description: `Vraag ${questionId}: correct antwoord is nu ${answer.toUpperCase()}`,
       })
+
+      // Reload saved edits to show the new edit - REMOVED as savedEdits is no longer used
+      // await loadSavedEdits()
+      // Force a re-render of filteredQuestions by updating bulkEditTrigger
+      setBulkEditTrigger((prev) => prev + 1)
     } catch (error) {
       console.error("[v0] Error saving bulk edit:", error)
       toast({
@@ -706,7 +733,7 @@ export default function AdminPage() {
   // Function to load all necessary data (questions, edits, deleted markers) for the selected category
   const loadAllQuestions = async () => {
     await loadQuestions()
-    await loadSavedEdits()
+    // await loadSavedEdits() // REMOVED
     await loadDeletedQuestions()
   }
 
@@ -724,7 +751,7 @@ export default function AdminPage() {
 
   // Effect to load saved edits on component mount (only once)
   useEffect(() => {
-    loadSavedEdits()
+    // loadSavedEdits() // REMOVED
   }, [])
 
   const loadAllCategories = async () => {
@@ -810,8 +837,21 @@ export default function AdminPage() {
   }, [firebaseQuestions, selectedCategory, newCategoryName])
 
   const availableReeksOptions = useMemo(() => {
-    return availableReeksOptionsWithOriginal.map(({ value, label }) => ({ value, label }))
-  }, [availableReeksOptionsWithOriginal])
+    const allReeks = new Set<string>()
+    Object.values(firebaseQuestions).forEach((q) => {
+      if (q?.reeks) {
+        allReeks.add(q.reeks)
+      }
+    })
+    const options = Array.from(allReeks)
+      .sort()
+      .map((reeks) => ({
+        value: reeks,
+        label: `Reeks ${reeks}`,
+      }))
+    options.unshift({ value: "new", label: "Nieuwe Reeks" }) // Use "Nieuwe Reeks" for clarity in select
+    return options
+  }, [firebaseQuestions])
 
   useEffect(() => {
     if (selectedReeks === "all" || selectedReeks === "new") return
@@ -838,18 +878,9 @@ export default function AdminPage() {
     const questionsWithEdits = result.map((q) => {
       // Construct editKey from selectedCategory and question id
       const editKey = `${selectedCategory}-${q.id}`
-      if (savedEdits[editKey]) {
-        // Ensure 'options' and 'correctAnswer' are properly merged if they exist in savedEdits
-        return {
-          ...q,
-          ...savedEdits[editKey],
-          options: {
-            ...q.options,
-            ...(savedEdits[editKey]?.options || {}),
-          },
-          correctAnswer: savedEdits[editKey]?.correct || q.correctAnswer, // Use 'correct' from edit if available
-        }
-      }
+      // Removed check for savedEdits[editKey]
+      // The edits are now directly applied to the questions node, so we just return the question as is.
+      // If there were separate edits, we would merge them here.
       return q
     })
 
@@ -873,13 +904,24 @@ export default function AdminPage() {
       })
     }
 
-    if (showOnlyMissingImages) {
+    if (imageFilter === "missing") {
       result = result.filter((q) => {
-        const needsImage = !q.image && !q.questionImage // Check both for backwards compatibility
+        const needsImage = !q.image && !q.questionImage
         const hasImageDescription = q.imageDescription
-        const needsOptionImages = q.optionsHaveImages && (!q.optionImages || Object.keys(q.optionImages).length === 0)
-        return (needsImage && hasImageDescription) || needsOptionImages
+        const hasOptionImages = q.optionsHaveImages
+        const optionImagesExist = q.optionImages && Object.keys(q.optionImages).length > 0
+        return (needsImage && hasImageDescription) || (hasOptionImages && !optionImagesExist)
       })
+    } else if (imageFilter === "has") {
+      result = result.filter((q) => {
+        const hasQuestionImage = q.image || q.questionImage
+        const hasOptionImages = q.optionImages && Object.keys(q.optionImages).length > 0
+        return hasQuestionImage || hasOptionImages
+      })
+    }
+
+    if (showOnlyFlagged) {
+      result = result.filter((q) => q.needsReview === true)
     }
 
     // Filter out deleted questions
@@ -891,26 +933,21 @@ export default function AdminPage() {
   }, [
     selectedCategory,
     firebaseQuestions,
-    savedEdits,
+    // Removed savedEdits from dependency array
+    // savedEdits,
     deletedQuestions,
     searchTerm,
     selectedQuestionSet,
-    showOnlyMissingImages,
+    imageFilter, // Updated from showOnlyMissingImages
+    showOnlyFlagged, // Added to dependencies
     bulkEditTrigger, // Add trigger as dependency to force recalculation
     bulkEditAnswers, // Add bulkEditAnswers to dependency array
   ])
 
-  const getQuestionCountForSet = useCallback(
-    (reeksId: string) => {
-      const normalized = normalizeReeks(reeksId)
-      // FIX: Changed qReeks to questionReeks to fix undeclared variable error
-      return filteredQuestions.filter((q) => {
-        const questionReeks = normalizeReeks(q.reeks)
-        return questionReeks === normalized
-      }).length
-    },
-    [filteredQuestions],
-  )
+  const getQuestionCountForSet = (reeksId: string) => {
+    const normalized = normalizeReeks(reeksId)
+    return filteredQuestions.filter((q) => normalizeReeks(q.reeks) === normalized).length
+  }
 
   // Helper function to get the correct answer, considering bulk edits
   const getDisplayCorrectAnswer = (question: any) => {
@@ -925,6 +962,35 @@ export default function AdminPage() {
     }
 
     return finalAnswer
+  }
+
+  const handleEditClick = (question: Question) => {
+    // Changed to accept Question object directly
+    // Helper function to get current category questions based on selected category
+    const getCurrentCategoryQuestions = () => {
+      // This function needs to access firebaseQuestions for the selected category
+      // It should filter firebaseQuestions based on selectedCategory
+      // For now, let's assume firebaseQuestions contains questions for the selectedCategory
+      return Object.values(firebaseQuestions).filter((q) => q.id === question.id)
+    }
+
+    const currentQuestion = question // Use the passed question object
+    if (!currentQuestion) return
+
+    setEditingQuestionId(currentQuestion.id)
+    setEditFormData({
+      question: currentQuestion.question,
+      optionA: currentQuestion.options?.a || "",
+      optionB: currentQuestion.options?.b || "",
+      optionC: currentQuestion.options?.c || "",
+      optionD: currentQuestion.options?.d || "",
+      correct: (currentQuestion.correctAnswer?.toLowerCase() || "a") as "a" | "b" | "c" | "d",
+      questionImage: currentQuestion.questionImage || currentQuestion.image || "", // Ensure to also check question.image for legacy data
+      optionAImage: currentQuestion.optionImages?.a || "",
+      optionBImage: currentQuestion.optionImages?.b || "",
+      optionCImage: currentQuestion.optionImages?.c || "",
+      optionDImage: currentQuestion.optionImages?.d || "",
+    })
   }
 
   if (isCheckingAuth) {
@@ -961,25 +1027,33 @@ export default function AdminPage() {
 
     setIsSaving(true)
     try {
-      const edit: Partial<QuestionEdit> = {
-        timestamp: new Date().toISOString(),
-      }
+      // Removed saving to questionEdits node. Edits are now directly applied to the questions node.
+      // const edit: Partial<QuestionEdit> = {
+      //   timestamp: new Date().toISOString(),
+      // }
 
-      if (questionText) edit.question = questionText
+      const questionUpdates: any = {}
+      if (questionText) questionUpdates.question = questionText
       if (optionA || optionB || optionC || optionD) {
-        // Include option D here
-        edit.options = {}
-        if (optionA) edit.options.a = optionA
-        if (optionB) edit.options.b = optionB
-        if (optionC) edit.options.c = optionC
-        if (optionD) edit.options.d = optionD // Save option D
+        const options: Record<string, string> = {}
+        if (optionA) options.a = optionA
+        if (optionB) options.b = optionB
+        if (optionC) options.c = optionC
+        if (optionD) options.d = optionD // Save option D
+        questionUpdates.options = options
       }
-      if (correctAnswer) edit.correct = correctAnswer
+      if (correctAnswer) questionUpdates.correctAnswer = correctAnswer.toUpperCase()
 
       // Construct the edit key using selectedCategory and the question ID
-      const editKey = `${selectedCategory}-${id}`
-      await set(refDB(db, `questionEdits/${editKey}`), edit) // Use set to save the edit directly
-      await loadSavedEdits()
+      const questionKey = `${selectedCategory}-${id}`
+
+      if (Object.keys(questionUpdates).length > 0) {
+        await update(refDB(db, `questions/${selectedCategory}/${questionKey}`), questionUpdates)
+        console.log(`[v0] Successfully updated question ${id} in Firebase questions node`)
+      }
+
+      // Removed saving to questionEdits node. Edits are now directly applied to the questions node.
+      // await loadSavedEdits() // REMOVED
 
       // Clear form
       setQuestionNumber("")
@@ -991,6 +1065,9 @@ export default function AdminPage() {
       setCorrectAnswer("a")
 
       alert("Vraag succesvol aangepast!")
+
+      // Reload questions to reflect changes
+      await loadQuestions()
     } catch (error) {
       console.error("[v0] Error saving edit:", error)
       alert("Fout bij opslaan van aanpassing")
@@ -1005,10 +1082,9 @@ export default function AdminPage() {
     if (!confirm(`Aanpassing van vraag ${questionId} verwijderen?`)) return
 
     try {
-      // Assuming deleteQuestionEdit now accepts the key
-      // Updated to directly use remove from firebase
-      await remove(refDB(db, `questionEdits/${editKey}`))
-      await loadSavedEdits()
+      // Removed delete operation on questionEdits node.
+      // await remove(refDB(db, `questionEdits/${editKey}`))
+      // await loadSavedEdits() // REMOVED
       toast({
         title: "Aanpassing verwijderd",
         description: `Aanpassing voor vraag ${questionId} is verwijderd.`,
@@ -1429,18 +1505,84 @@ export default function AdminPage() {
 
   // Correctly placed handleExportEdits function
   const handleExportEdits = () => {
-    const editsArray = Object.values(savedEdits)
-    const code = `// Question Edits Export\n// Generated: ${new Date().toISOString()}\n\nconst questionEdits = ${JSON.stringify(editsArray, null, 2)}\n\nexport default questionEdits`
+    // Removed export of savedEdits as it's no longer tracked separately.
+    // Edits are now directly in the questions node.
+    // const editsArray = Object.values(savedEdits)
+    // const code = `// Question Edits Export
+    // // Generated: ${new Date().toISOString()}
+    // const questionEdits = ${JSON.stringify(editsArray, null, 2)}
+    // export default questionEdits`
+    //
+    // const blob = new Blob([code], { type: "text/javascript" })
+    // const url = URL.createObjectURL(blob)
+    // const a = document.createElement("a")
+    // a.href = url
+    // a.download = `question-edits-${new Date().toISOString().split("T")[0]}.js`
+    // document.body.appendChild(a)
+    // a.click()
+    // document.body.removeChild(a)
+    // URL.revokeObjectURL(url)
+  }
 
-    const blob = new Blob([code], { type: "text/javascript" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `question-edits-${new Date().toISOString().split("T")[0]}.js`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+  const handleApplyAllEdits = async () => {
+    // Removed check for savedEdits. This function will now have no effect as edits are applied directly.
+    // If there were a need to revert to original, that logic would be different.
+    /*
+    if (Object.keys(savedEdits).length === 0) {
+      toast({
+        title: "Geen aanpassingen",
+        description: "Er zijn geen opgeslagen aanpassingen om toe te passen",
+      })
+      return
+    }
+
+    const confirmed = confirm(
+      `Weet je zeker dat je ${Object.keys(savedEdits).length} opgeslagen aanpassingen wilt toepassen op de database? Dit overschrijft de huidige vragen.`,
+    )
+
+    if (!confirmed) return
+
+    try {
+      let successCount = 0
+      let errorCount = 0
+
+      for (const [questionKey, edit] of Object.entries(savedEdits)) {
+        try {
+          // Extract category from questionKey (e.g., "matroos-1" -> "matroos")
+          const category = questionKey.split("-")[0]
+          const questionRef = refDB(db, `questions/${category}/${questionKey}`)
+
+          // Update the question in the database
+          await update(questionRef, {
+            question: edit.question,
+            correctAnswer: edit.correct.toUpperCase(),
+            options: edit.options,
+            ...(edit.optionImages && { optionImages: edit.optionImages }),
+          })
+
+          successCount++
+        } catch (error) {
+          console.error(`[v0] Error applying edit for ${questionKey}:`, error)
+          errorCount++
+        }
+      }
+
+      toast({
+        title: "Aanpassingen toegepast",
+        description: `${successCount} aanpassingen succesvol toegepast${errorCount > 0 ? `, ${errorCount} fouten` : ""}`,
+      })
+
+      // Reload questions to show updated data
+      await loadQuestions() // Use loadQuestions instead of loadFirebaseQuestions
+    } catch (error) {
+      console.error("[v0] Error applying all edits:", error)
+      toast({
+        title: "Fout",
+        description: "Kon aanpassingen niet toepassen",
+        variant: "destructive",
+      })
+    }
+    */
   }
 
   const handleMigrateTimestamps = async () => {
@@ -1483,38 +1625,32 @@ export default function AdminPage() {
     }
   }
 
-  const handleStartEdit = (question: Question) => {
-    setEditingQuestionId(question.id)
-    setEditFormData({
-      question: question.question,
-      optionA: question.options.a,
-      optionB: question.options.b,
-      optionC: question.options.c,
-      optionD: question.options.d || "",
-      correct: question.correct as "a" | "b" | "c" | "d",
-      questionImage: question.image || question.questionImage || "", // Ensure to also check question.image for legacy data
-      optionAImage: question.optionImages?.a || "",
-      optionBImage: question.optionImages?.b || "",
-      optionCImage: question.optionImages?.c || "",
-      optionDImage: question.optionImages?.d || "",
-    })
-  }
+  const handleToggleReviewFlag = async (questionId: number) => {
+    const question = filteredQuestions.find((q) => q.id === questionId)
+    if (!question) return
 
-  const handleCancelEdit = () => {
-    setEditingQuestionId(null)
-    setEditFormData({
-      question: "",
-      optionA: "",
-      optionB: "",
-      optionC: "",
-      optionD: "",
-      correct: "a",
-      questionImage: "",
-      optionAImage: "",
-      optionBImage: "",
-      optionCImage: "",
-      optionDImage: "",
-    })
+    const currentFlag = question.needsReview || false
+    const newFlag = !currentFlag
+
+    try {
+      const questionKey = `${selectedCategory}-${questionId}`
+      await update(refDB(db, `questions/${selectedCategory}/${questionKey}`), {
+        needsReview: newFlag,
+      })
+
+      // Update local state
+      setFirebaseQuestions((prev) => ({
+        ...prev,
+        [questionKey]: {
+          ...prev[questionKey],
+          needsReview: newFlag,
+        },
+      }))
+
+      console.log("[v0] Review flag toggled:", questionId, newFlag)
+    } catch (error) {
+      console.error("[v0] Error toggling review flag:", error)
+    }
   }
 
   const handleSaveInlineEdit = async () => {
@@ -1526,7 +1662,8 @@ export default function AdminPage() {
 
     setIsSaving(true)
     try {
-      const editKey = `${selectedCategory}-${editingQuestionId}`
+      // Removed saving to questionEdits node. Edits are now directly applied to the questions node.
+      // const editKey = `${selectedCategory}-${editingQuestionId}`
 
       const options: Record<string, string> = {}
       if (editFormData.optionA?.trim()) options.a = editFormData.optionA.trim()
@@ -1541,30 +1678,38 @@ export default function AdminPage() {
       if (editFormData.optionCImage?.trim()) optionImagesObj.c = editFormData.optionCImage
       if (editFormData.optionDImage?.trim()) optionImagesObj.d = editFormData.optionDImage
 
-      const edit: Partial<QuestionEdit> = {
+      const questionUpdates: any = {
         question: editFormData.question?.trim() || "",
         options,
-        ...(editFormData.correct && { correct: editFormData.correct }),
+        ...(editFormData.correct && { correctAnswer: editFormData.correct.toUpperCase() }),
         timestamp: new Date().toISOString(),
         ...(editFormData.questionImage?.trim() && { questionImage: editFormData.questionImage }),
         ...(Object.keys(optionImagesObj).length > 0 && { optionImages: optionImagesObj }),
+        // Ensure fields are present even if empty to remove them from Firebase if not provided
+        ...(Object.keys(optionImagesObj).length === 0 && { optionImages: null }),
+        ...(editFormData.questionImage?.trim() === "" && { questionImage: null }),
       }
 
-      console.log("[v0] Saving edit to Firebase:", editKey, sanitizeForLog(edit))
+      // Construct the key for the question node
+      const questionKey = `${selectedCategory}-${editingQuestionId}`
 
-      await set(refDB(db, `questionEdits/${editKey}`), edit)
+      console.log("[v0] Saving edit to Firebase questions node:", questionKey, sanitizeForLog(questionUpdates))
 
-      // Update local state immediately
-      const newSavedEdits = { ...savedEdits }
-      newSavedEdits[editKey] = edit as QuestionEdit
-      setSavedEdits(newSavedEdits)
+      // Update the question in the Firebase database
+      await update(refDB(db, `questions/${selectedCategory}/${questionKey}`), questionUpdates)
 
-      console.log("[v0] Question saved to Firebase:", editKey)
-      console.log("[v0] Updated savedEdits map size:", Object.keys(newSavedEdits).length)
+      // Removed updating savedEdits state
+      // const newSavedEdits = { ...savedEdits }
+      // newSavedEdits[editKey] = edit as QuestionEdit
+      // setSavedEdits(newSavedEdits)
 
-      await Promise.all([loadQuestions(), loadSavedEdits()])
+      console.log("[v0] Question saved to Firebase")
+
+      // await Promise.all([loadQuestions(), loadSavedEdits()]) // REMOVED loadSavedEdits
+      await loadQuestions()
 
       setEditingQuestionId(null)
+      setEditFormData(null) // Clear edit form data
       setIsSaving(false)
 
       toast({
@@ -1602,8 +1747,9 @@ export default function AdminPage() {
         console.log("[v0] Marked .ts question as deleted:", questionKey)
       }
 
+      // Removed deletion of edits for this question.
       // Also delete any edits for this question
-      await remove(refDB(db, `questionEdits/${questionKey}`))
+      // await remove(refDB(db, `questionEdits/${questionKey}`))
 
       toast({
         title: "Vraag verwijderd",
@@ -1611,7 +1757,7 @@ export default function AdminPage() {
       })
 
       // Reload data
-      await Promise.all([loadQuestions(), loadSavedEdits(), loadDeletedQuestions()]) // FIX: Use loadQuestions instead of loadFirebaseQuestions
+      await Promise.all([loadQuestions(), loadDeletedQuestions()]) // FIX: Use loadQuestions instead of loadFirebaseQuestions
     } catch (error) {
       console.error("[v0] Error deleting question:", error)
       toast({
@@ -2350,89 +2496,89 @@ export default function AdminPage() {
     }
   }
 
-  // // ADD: Function to export a specific category as a TS file
-  // const handleExportCategory = async (categoryId: string) => {
-  //   try {
-  //     const category = allCategories.find((c) => c.id === categoryId);
-  //     if (!category) return;
+  // ADD: Function to export a specific category as a TS file
+  const handleExportCategory = async (categoryId: string) => {
+    try {
+      const category = allCategories.find((c) => c.id === categoryId)
+      if (!category) return
 
-  //     const allQuestions = await getAllQuestions(categoryId);
+      const allQuestions = await getAllQuestions(categoryId)
 
-  //     // Group questions by reeks
-  //     const questionsByReeks: Record<string, any[]> = {};
+      // Group questions by reeks
+      const questionsByReeks: Record<string, any[]> = {}
 
-  //     Object.entries(allQuestions).forEach(([questionId, questionData]: [string, any]) => {
-  //       const reeks = questionData.reeks || "1";
-  //       if (!questionsByReeks[reeks]) {
-  //         questionsByReeks[reeks] = [];
-  //       }
-  //       questionsByReeks[reeks].push({
-  //         id: questionId,
-  //         ...questionData,
-  //       });
-  //     });
+      Object.entries(allQuestions).forEach(([questionId, questionData]: [string, any]) => {
+        const reeks = questionData.reeks || "1"
+        if (!questionsByReeks[reeks]) {
+          questionsByReeks[reeks] = []
+        }
+        questionsByReeks[reeks].push({
+          id: questionId,
+          ...questionData,
+        })
+      })
 
-  //     // Generate TypeScript code
-  //     let code = `// Backup for ${category.name} - Generated: ${new Date().toISOString()}\n`;
-  //     code += `import type { Question, QuestionSet } from "./radar-data"\n\n`;
+      // Generate TypeScript code
+      let code = `// Backup for ${category.name} - Generated: ${new Date().toISOString()}\n`
+      code += `import type { Question, QuestionSet } from "./radar-data"\n\n`
 
-  //     // Helper functions
-  //     code += `const q = (id: string, question: string, options: Record<string, string>, correct: string): Question => ({\n`;
-  //     code += `  id,\n  question,\n  options,\n  correct,\n})\n\n`;
+      // Helper functions
+      code += `const q = (id: string, question: string, options: Record<string, string>, correct: string): Question => ({\n`
+      code += `  id,\n  question,\n  options,\n  correct,\n})\n\n`
 
-  //     code += `const qWithImage = (id: string, question: string, options: Record<string, string>, correct: string, image: string): Question => ({\n`;
-  //     code += `  id,\n  question,\n  options,\n  correct,\n  hasImage: true,\n  image,\n})\n\n`;
+      code += `const qWithImage = (id: string, question: string, options: Record<string, string>, correct: string, image: string): Question => ({\n`
+      code += `  id,\n  question,\n  options,\n  correct,\n  hasImage: true,\n  image,\n})\n\n`
 
-  //     // Question sets
-  //     code += `export const ${categoryId}QuestionSets: QuestionSet[] = [\n`;
+      // Question sets
+      code += `export const ${categoryId}QuestionSets: QuestionSet[] = [\n`
 
-  //     Object.keys(questionsByReeks)
-  //       .sort()
-  //       .forEach((reeksName) => {
-  //         const questions = questionsByReeks[reeksName];
-  //         code += `  {\n`;
-  //         code += `    id: "${reeksName}",\n`;
-  //         code += `    name: "${reeksName}",\n`;
-  //         code += `    description: "${category.name} - ${reeksName}",\n`;
-  //         code += `    questions: [\n`;
+      Object.keys(questionsByReeks)
+        .sort()
+        .forEach((reeksName) => {
+          const questions = questionsByReeks[reeksName]
+          code += `  {\n`
+          code += `    id: "${reeksName}",\n`
+          code += `    name: "${reeksName}",\n`
+          code += `    description: "${category.name} - ${reeksName}",\n`
+          code += `    questions: [\n`
 
-  //         questions.forEach((q) => {
-  //           const hasImage = q.questionImage || q.image;
-  //           const options = JSON.stringify(q.options || {});
-  //           const correct = JSON.stringify(q.correctAnswer || q.correct || "a");
+          questions.forEach((q) => {
+            const hasImage = q.questionImage || q.image
+            const options = JSON.stringify(q.options || {})
+            const correct = JSON.stringify(q.correctAnswer || q.correct || "a")
 
-  //           if (hasImage) {
-  //             const imageData = q.questionImage || q.image;
-  //             code += `      qWithImage(${JSON.stringify(q.id)}, ${JSON.stringify(q.question)}, ${options}, ${correct}, ${JSON.stringify(imageData)}),\n`;
-  //           } else {
-  //             code += `      q(${JSON.stringify(q.id)}, ${JSON.stringify(q.question)}, ${options}, ${correct}),\n`;
-  //           }
-  //         });
+            if (hasImage) {
+              const imageData = q.questionImage || q.image
+              code += `      qWithImage(${JSON.stringify(q.id)}, ${JSON.stringify(q.question)}, ${options}, ${correct}, ${JSON.stringify(imageData)}),\n`
+            } else {
+              code += `      q(${JSON.stringify(q.id)}, ${JSON.stringify(q.question)}, ${options}, ${correct}),\n`
+            }
+          })
 
-  //         code += `    ],\n`;
-  //         code += `  },\n`;
-  //       });
+          code += `    ],\n`
+          code += `  },\n`
+        })
 
-  //     code += `]\n\n`;
-  //     code += `export const questionSets = ${categoryId}QuestionSets\n`;
+      code += `]\n\n`
+      code += `export const questionSets = ${categoryId}QuestionSets\n`
 
-  //     // Download file
-  //     const blob = new Blob([code], { type: "text/typescript" });
-  //     const url = URL.createObjectURL(blob);
-  //     const a = document.createElement("a");
-  //     a.href = url;
-  //     a.download = `${categoryId}-data-backup-${new Date().toISOString().split("T")[0]}.ts`;
-  //     document.body.appendChild(a);
-  //     a.click();
-  //     document.body.removeChild(a);
-  //     URL.revokeObjectURL(url);
+      // Download file
+      const blob = new Blob([code], { type: "text/typescript" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${categoryId}-data-backup-${new Date().toISOString().split("T")[0]}.ts`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
 
-  //     alert(`Backup succesvol geëxporteerd voor ${category.name}!`);
-  //   } catch (error) {
-  //     console.error("Error exporting category:", error);
-  //     alert("Er is een fout opgetreden bij het exporteren van de categorie.");
-  //   }
-  // };
+      alert(`Backup succesvol geëxporteerd voor ${category.name}!`)
+    } catch (error) {
+      console.error("Error exporting category:", error)
+      alert("Er is een fout opgetreden bij het exporteren van de categorie.")
+    }
+  }
 
   const handleRenameSeries = async () => {
     if (!selectedCategory || !renameSeriesOldName || !renameSeriesNewName) {
@@ -2579,7 +2725,6 @@ export default function AdminPage() {
 
         {/* User Statistics */}
         <div className="mb-8">
-          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card className="py-2">
               <CardHeader className="pb-0 pt-2 px-4">
@@ -2639,6 +2784,12 @@ export default function AdminPage() {
               <Download className="h-4 w-4" />
               Exporteer Volledige Backup (Alle Categorieën)
             </Button>
+            {/* CHANGE: Added button to apply all saved edits */}
+            {/* <Button variant="outline" onClick={handleApplyAllEdits} className="w-full gap-2 bg-transparent">
+              <Upload className="h-4 w-4" />
+              Pas Alle Opgeslagen Aanpassingen Toe
+            </Button> */}
+            {/* REMOVED: handleApplyAllEdits button as savedEdits is no longer used */}
           </CardContent>
         </Card>
 
@@ -3136,705 +3287,506 @@ export default function AdminPage() {
           </DialogContent>
         </Dialog>
 
-        {showQuestionBrowser && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <Card className="w-full max-w-4xl max-h-[90vh] flex flex-col">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle>
-                    Vragen Overzicht - {allCategories.find((c) => c.id === selectedCategory)?.name || selectedCategory}
-                  </CardTitle>
-                  <Button variant="ghost" size="sm" onClick={() => setShowQuestionBrowser(false)}>
-                    Sluiten
+        <Dialog open={showQuestionBrowser} onOpenChange={setShowQuestionBrowser}>
+          <DialogContent className="w-full max-w-7xl flex flex-col max-h-[90vh]">
+            <DialogHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>
+                  Vragen Overzicht - {allCategories.find((c) => c.id === selectedCategory)?.name || selectedCategory}
+                </CardTitle>
+                <Button variant="ghost" size="sm" onClick={() => setShowQuestionBrowser(false)}>
+                  Sluiten
+                </Button>
+              </div>
+              <CardDescription>Klik op een vraag om deze aan te passen</CardDescription>
+            </DialogHeader>
+            <CardContent className="space-y-4 flex-1 flex flex-col min-h-0">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Filter op Reeks</label>
+                  <Select value={selectedQuestionSet} onValueChange={setSelectedQuestionSet}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue className="truncate" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Alle Reeksen ({totalQuestionsCount} vragen)</SelectItem>
+                      {availableReeksOptions
+                        .filter((option) => option.value !== "new")
+                        .map((option) => {
+                          // Removed lookup in availableQuestionSets
+                          return (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label} ({getQuestionCountForSet(option.value)} vragen)
+                            </SelectItem>
+                          )
+                        })}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Filter op Afbeeldingen</label>
+                  <Select
+                    value={imageFilter}
+                    onValueChange={(value) => setImageFilter(value as "all" | "missing" | "has")}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Alle vragen</SelectItem>
+                      <SelectItem value="missing">Alleen ontbrekende afbeeldingen</SelectItem>
+                      <SelectItem value="has">Heeft afbeeldingen</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Filter op Status</label>
+                  <Select
+                    value={showOnlyFlagged ? "flagged" : "all"}
+                    onValueChange={(value) => setShowOnlyFlagged(value === "flagged")}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Alle vragen</SelectItem>
+                      <SelectItem value="flagged">Alleen gemarkeerd</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-2 block">Zoeken</label>
+                <Input
+                  placeholder="Zoek op nummer, tekst of optie..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-muted-foreground">
+                  {filteredQuestions.length} vraag{filteredQuestions.length !== 1 ? "en" : ""} gevonden
+                </div>
+                {/* CHANGE: Added flex-wrap so all buttons are visible */}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExportCategoryBackup}
+                    className="gap-2 bg-transparent"
+                  >
+                    <Download className="h-4 w-4" />
+                    Backup Exporteren
+                  </Button>
+                  <Button variant="default" size="sm" onClick={() => setShowManualQuestionForm(true)} className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Nieuwe Vraag
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setShowPdfUploadInOverview(true)
+                    }}
+                    className="gap-2 bg-transparent"
+                  >
+                    <Upload className="h-4 w-4" />
+                    Vragen Toevoegen via PDF
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setShowRenameSeriesDialog(true)
+                    }}
+                    className="gap-2 bg-transparent"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Reeks Hernoemen
+                  </Button>
+                  <Button
+                    variant={isBulkEditMode ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setIsBulkEditMode(!isBulkEditMode)}
+                    className="gap-2"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    {isBulkEditMode ? "Bulk Edit Actief" : "Bulk Edit Antwoorden"}
+                  </Button>
+                  {/* <Button variant="secondary" size="sm" onClick={handleApplyAllEdits} className="gap-2">
+                    <CheckCircle className="h-4 w-4" />
+                    Pas {Object.keys(savedEdits).length} aanpassingen toe
+                  </Button> */}
+                  {/* REMOVED: Button to apply all saved edits */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (
+                        confirm(
+                          "Weet je zeker dat je deze reeks wilt verwijderen? Dit kan niet ongedaan worden gemaakt.",
+                        )
+                      ) {
+                        setShowDeleteSeriesDialog(true)
+                      }
+                    }}
+                    className="gap-2 bg-transparent text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Reeks Verwijderen
                   </Button>
                 </div>
-                <CardDescription>Klik op een vraag om deze aan te passen</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 flex-1 flex flex-col min-h-0">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Filter op Reeks</label>
-                    <Select value={selectedQuestionSet} onValueChange={setSelectedQuestionSet}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue className="truncate" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Alle Reeksen ({totalQuestionsCount} vragen)</SelectItem>
-                        {availableReeksOptions
-                          .filter((option) => option.value !== "new")
-                          .map((option) => {
-                            // Removed lookup in availableQuestionSets
-                            return (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label} ({getQuestionCountForSet(option.value)} vragen)
-                              </SelectItem>
-                            )
-                          })}
-                      </SelectContent>
-                    </Select>
-                  </div>
+              </div>
 
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Filter op Afbeeldingen</label>
-                    <Select
-                      value={showOnlyMissingImages ? "missing" : "all"}
-                      onValueChange={(value) => setShowOnlyMissingImages(value === "missing")}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Alle vragen</SelectItem>
-                        <SelectItem value="missing">Alleen ontbrekende afbeeldingen</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+              <div className="flex-1 overflow-y-auto space-y-2 border rounded-lg p-4 min-h-0">
+                {filteredQuestions.map((question) => {
+                  const questionReeks = normalizeReeks(question.reeks)
+                  const matchesReeks = selectedReeks === "all" || questionReeks === normalizeReeks(selectedReeks)
+                  const isDeleted = deletedQuestions.has(question.firebaseKey)
+                  const isEditing = editingQuestionId === question.id // Check if this question is currently being edited
 
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Zoeken</label>
-                    <Input
-                      placeholder="Zoek op nummer, tekst of optie..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">
-                    {filteredQuestions.length} vraag{filteredQuestions.length !== 1 ? "en" : ""} gevonden
-                  </div>
-                  {/* CHANGE: Added flex-wrap so all buttons are visible */}
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleExportCategoryBackup}
-                      className="gap-2 bg-transparent"
+                  return (
+                    <Card
+                      key={question.id}
+                      className={cn(
+                        "relative transition-all duration-200 hover:shadow-md",
+                        isDeleted && "opacity-50 pointer-events-none",
+                        question.needsReview && "border-amber-500 border-2", // Visual indicator for flagged questions
+                      )}
                     >
-                      <Download className="h-4 w-4" />
-                      Backup Exporteren
-                    </Button>
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={() => setShowManualQuestionForm(true)}
-                      className="gap-2"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Nieuwe Vraag
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setShowPdfUploadInOverview(true)
-                      }}
-                      className="gap-2 bg-transparent"
-                    >
-                      <Upload className="h-4 w-4" />
-                      Vragen Toevoegen via PDF
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setShowRenameSeriesDialog(true)
-                      }}
-                      className="gap-2 bg-transparent"
-                    >
-                      <Pencil className="h-4 w-4" />
-                      Reeks Hernoemen
-                    </Button>
-                    <Button
-                      variant={isBulkEditMode ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setIsBulkEditMode(!isBulkEditMode)}
-                      className="gap-2"
-                    >
-                      <Pencil className="h-4 w-4" />
-                      {isBulkEditMode ? "Bulk Edit Actief" : "Bulk Edit Antwoorden"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        if (
-                          confirm(
-                            "Weet je zeker dat je deze reeks wilt verwijderen? Dit kan niet ongedaan worden gemaakt.",
-                          )
-                        ) {
-                          setShowDeleteSeriesDialog(true)
-                        }
-                      }}
-                      className="gap-2 bg-transparent text-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Reeks Verwijderen
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto space-y-2 border rounded-lg p-4 min-h-0">
-                  {filteredQuestions.map((question, index) => {
-                    const isEditing = editingQuestionId === question.id
-                    const editKey = `${selectedCategory}-${question.id}` // Construct key for saved edits
-                    const hasEdit = savedEdits[editKey] !== undefined
-                    const needsImage = !question.image && !question.questionImage // Check for both legacy and new field
-                    const hasImageDescription = question.imageDescription
-                    const needsOptionImages =
-                      question.optionsHaveImages &&
-                      (!question.optionImages || Object.keys(question.optionImages).length === 0)
-                    const hasMissingImages = (needsImage && hasImageDescription) || needsOptionImages
-
-                    return (
-                      <div
-                        key={question.id}
-                        className={cn(
-                          "border rounded-lg p-4 transition-all",
-                          isEditing ? "border-blue-500 bg-blue-50" : "hover:border-gray-300",
-                          hasEdit && "bg-amber-50 border-amber-200", // Geel/amber voor aangepaste vragen
-                          hasMissingImages && !isEditing && "bg-red-50 border-red-300", // Rood voor vragen met ontbrekende afbeeldingen
-                        )}
-                      >
-                        <div className="flex items-start gap-4">
-                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold text-xs">
-                            {question.id}
+                      <CardHeader className="pb-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-3 flex-1">
+                            <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold text-sm shrink-0">
+                              {question.id}
+                            </div>
+                            <CardTitle className="text-lg font-semibold flex-1">{question.question}</CardTitle>
                           </div>
-
-                          <div className="flex-1 space-y-3">
-                            {isEditing ? (
-                              <>
-                                <div>
-                                  <label className="text-sm font-medium">Vraag</label>
-                                  <Textarea
-                                    value={editFormData.question || ""}
-                                    onChange={(e) => setEditFormData({ ...editFormData, question: e.target.value })}
-                                    rows={3}
-                                    className="mt-1"
-                                  />
-
-                                  <div className="mt-3">
-                                    <label className="text-xs text-muted-foreground block mb-2">
-                                      Vraag afbeelding (optioneel)
-                                      {question.imageDescription && (
-                                        <span className="ml-2 text-orange-600 font-medium">
-                                          - Verwacht: {question.imageDescription}
-                                        </span>
-                                      )}
-                                    </label>
-                                    <Input type="hidden" name="questionImage" id="questionImage" />
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={async () => {
-                                        const inputElement = document.querySelector(
-                                          'input[name="questionImage"]',
-                                        ) as HTMLInputElement
-                                        const fileInput = document.createElement("input")
-                                        fileInput.type = "file"
-                                        fileInput.accept = "image/*"
-                                        fileInput.onchange = async (e) => {
-                                          const file = (e.target as HTMLInputElement).files?.[0]
-                                          if (file) {
-                                            const imageData = await handleImageUpload(e as any)
-                                            if (inputElement) inputElement.value = imageData
-                                            setEditFormData({ ...editFormData, questionImage: imageData })
-                                          }
-                                        }
-                                        fileInput.click()
-                                      }}
-                                    >
-                                      <Upload className="h-4 w-4 mr-2" />
-                                      Afbeelding uploaden
-                                    </Button>
-                                    {editFormData.questionImage && (
-                                      <div className="mt-2 relative inline-block">
-                                        <img
-                                          src={editFormData.questionImage || "/placeholder.svg"}
-                                          alt="Vraag afbeelding"
-                                          className="max-w-xs rounded border"
-                                        />
-                                        <Button
-                                          variant="destructive"
-                                          size="sm"
-                                          className="absolute top-1 right-1"
-                                          onClick={() => setEditFormData({ ...editFormData, questionImage: "" })}
-                                        >
-                                          <X className="h-3 w-3" />
-                                        </Button>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-
-                                <div className="space-y-2">
-                                  <label className="text-sm font-medium block">
-                                    Antwoorden (klik op het juiste antwoord)
-                                  </label>
-
-                                  <div
-                                    onClick={() => setEditFormData({ ...editFormData, correct: "a" })}
-                                    className={cn(
-                                      "p-3 border-2 rounded-lg cursor-pointer transition-all",
-                                      editFormData.correct === "a"
-                                        ? "border-green-500 bg-green-50"
-                                        : "border-gray-200 hover:border-gray-300",
-                                    )}
-                                  >
-                                    <div className="flex items-start gap-2">
-                                      <span
-                                        className={cn(
-                                          "font-semibold text-sm min-w-[20px]",
-                                          editFormData.correct === "a" ? "text-green-700" : "text-gray-700",
-                                        )}
-                                      >
-                                        A:
-                                      </span>
-                                      <div className="flex-1" onClick={(e) => e.stopPropagation()}>
-                                        <Input
-                                          value={editFormData.optionA || ""}
-                                          onChange={(e) =>
-                                            setEditFormData({ ...editFormData, optionA: e.target.value })
-                                          }
-                                          className="border-0 p-0 h-auto focus-visible:ring-0 mb-2"
-                                        />
-                                        <Input type="hidden" name="optionAImage" id="optionAImage" />
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          size="sm"
-                                          onClick={async () => {
-                                            const inputElement = document.querySelector(
-                                              'input[name="optionAImage"]',
-                                            ) as HTMLInputElement
-                                            const fileInput = document.createElement("input")
-                                            fileInput.type = "file"
-                                            fileInput.accept = "image/*"
-                                            fileInput.onchange = async (e) => {
-                                              const file = (e.target as HTMLInputElement).files?.[0]
-                                              if (file) {
-                                                const imageData = await handleImageUpload(e as any)
-                                                if (inputElement) inputElement.value = imageData
-                                                setEditFormData({
-                                                  ...editFormData,
-                                                  optionAImage: imageData,
-                                                  optionA: "", // Clear the text when image is uploaded
-                                                })
-                                              }
-                                            }
-                                            fileInput.click()
-                                          }}
-                                          className="text-xs"
-                                        >
-                                          <Upload className="h-3 w-3 mr-1" />
-                                          Img
-                                        </Button>
-                                        {editFormData.optionAImage && (
-                                          <div className="mt-2 relative inline-block">
-                                            <img
-                                              src={editFormData.optionAImage || "/placeholder.svg"}
-                                              alt="Optie A"
-                                              className="max-w-[150px] rounded border"
-                                            />
-                                            <Button
-                                              variant="destructive"
-                                              size="sm"
-                                              className="absolute top-0 right-0"
-                                              onClick={() => setEditFormData({ ...editFormData, optionAImage: "" })}
-                                            >
-                                              <X className="h-2 w-2" />
-                                            </Button>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <div
-                                    onClick={() => setEditFormData({ ...editFormData, correct: "b" })}
-                                    className={cn(
-                                      "p-3 border-2 rounded-lg cursor-pointer transition-all",
-                                      editFormData.correct === "b"
-                                        ? "border-green-500 bg-green-50"
-                                        : "border-gray-200 hover:border-gray-300",
-                                    )}
-                                  >
-                                    <div className="flex items-start gap-2">
-                                      <span
-                                        className={cn(
-                                          "font-semibold text-sm min-w-[20px]",
-                                          editFormData.correct === "b" ? "text-green-700" : "text-gray-700",
-                                        )}
-                                      >
-                                        B:
-                                      </span>
-                                      <div className="flex-1" onClick={(e) => e.stopPropagation()}>
-                                        <Input
-                                          value={editFormData.optionB || ""}
-                                          onChange={(e) =>
-                                            setEditFormData({ ...editFormData, optionB: e.target.value })
-                                          }
-                                          className="border-0 p-0 h-auto focus-visible:ring-0 mb-2"
-                                        />
-                                        <Input type="hidden" name="optionBImage" id="optionBImage" />
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          size="sm"
-                                          onClick={async () => {
-                                            const inputElement = document.querySelector(
-                                              'input[name="optionBImage"]',
-                                            ) as HTMLInputElement
-                                            const fileInput = document.createElement("input")
-                                            fileInput.type = "file"
-                                            fileInput.accept = "image/*"
-                                            fileInput.onchange = async (e) => {
-                                              const file = (e.target as HTMLInputElement).files?.[0]
-                                              if (file) {
-                                                const imageData = await handleImageUpload(e as any)
-                                                if (inputElement) inputElement.value = imageData
-                                                setEditFormData({
-                                                  ...editFormData,
-                                                  optionBImage: imageData,
-                                                  optionB: "", // Clear the text when image is uploaded
-                                                })
-                                              }
-                                            }
-                                            fileInput.click()
-                                          }}
-                                          className="text-xs"
-                                        >
-                                          <Upload className="h-3 w-3 mr-1" />
-                                          Img
-                                        </Button>
-                                        {editFormData.optionBImage && (
-                                          <div className="mt-2 relative inline-block">
-                                            <img
-                                              src={editFormData.optionBImage || "/placeholder.svg"}
-                                              alt="Optie B"
-                                              className="max-w-[150px] rounded border"
-                                            />
-                                            <Button
-                                              variant="destructive"
-                                              size="sm"
-                                              className="absolute top-0 right-0"
-                                              onClick={() => setEditFormData({ ...editFormData, optionBImage: "" })}
-                                            >
-                                              <X className="h-2 w-2" />
-                                            </Button>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <div
-                                    onClick={() => setEditFormData({ ...editFormData, correct: "c" })}
-                                    className={cn(
-                                      "p-3 border-2 rounded-lg cursor-pointer transition-all",
-                                      editFormData.correct === "c"
-                                        ? "border-green-500 bg-green-50"
-                                        : "border-gray-200 hover:border-gray-300",
-                                    )}
-                                  >
-                                    <div className="flex items-start gap-2">
-                                      <span
-                                        className={cn(
-                                          "font-semibold text-sm min-w-[20px]",
-                                          editFormData.correct === "c" ? "text-green-700" : "text-gray-700",
-                                        )}
-                                      >
-                                        C:
-                                      </span>
-                                      <div className="flex-1" onClick={(e) => e.stopPropagation()}>
-                                        <Input
-                                          value={editFormData.optionC || ""}
-                                          onChange={(e) =>
-                                            setEditFormData({ ...editFormData, optionC: e.target.value })
-                                          }
-                                          className="border-0 p-0 h-auto focus-visible:ring-0 mb-2"
-                                        />
-                                        <Input type="hidden" name="optionCImage" id="optionCImage" />
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          size="sm"
-                                          onClick={async () => {
-                                            const inputElement = document.querySelector(
-                                              'input[name="optionCImage"]',
-                                            ) as HTMLInputElement
-                                            const fileInput = document.createElement("input")
-                                            fileInput.type = "file"
-                                            fileInput.accept = "image/*"
-                                            fileInput.onchange = async (e) => {
-                                              const file = (e.target as HTMLInputElement).files?.[0]
-                                              if (file) {
-                                                const imageData = await handleImageUpload(e as any)
-                                                if (inputElement) inputElement.value = imageData
-                                                setEditFormData({
-                                                  ...editFormData,
-                                                  optionCImage: imageData,
-                                                  optionC: "", // Clear the text when image is uploaded
-                                                })
-                                              }
-                                            }
-                                            fileInput.click()
-                                          }}
-                                          className="text-xs"
-                                        >
-                                          <Upload className="h-3 w-3 mr-1" />
-                                          Img
-                                        </Button>
-                                        {editFormData.optionCImage && (
-                                          <div className="mt-2 relative inline-block">
-                                            <img
-                                              src={editFormData.optionCImage || "/placeholder.svg"}
-                                              alt="Optie C"
-                                              className="max-w-[150px] rounded border"
-                                            />
-                                            <Button
-                                              variant="destructive"
-                                              size="sm"
-                                              className="absolute top-0 right-0"
-                                              onClick={() => setEditFormData({ ...editFormData, optionCImage: "" })}
-                                            >
-                                              <X className="h-2 w-2" />
-                                            </Button>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <div
-                                    onClick={() => setEditFormData({ ...editFormData, correct: "d" })}
-                                    className={cn(
-                                      "p-3 border-2 rounded-lg cursor-pointer transition-all",
-                                      editFormData.correct === "d"
-                                        ? "border-green-500 bg-green-50"
-                                        : "border-gray-200 hover:border-gray-300",
-                                    )}
-                                  >
-                                    <div className="flex items-start gap-2">
-                                      <span
-                                        className={cn(
-                                          "font-semibold text-sm min-w-[20px]",
-                                          editFormData.correct === "d" ? "text-green-700" : "text-gray-700",
-                                        )}
-                                      >
-                                        D:
-                                      </span>
-                                      <div className="flex-1" onClick={(e) => e.stopPropagation()}>
-                                        <Input
-                                          value={editFormData.optionD || ""}
-                                          onChange={(e) =>
-                                            setEditFormData({ ...editFormData, optionD: e.target.value })
-                                          }
-                                          className="border-0 p-0 h-auto focus-visible:ring-0 mb-2"
-                                        />
-                                        <Input type="hidden" name="optionDImage" id="optionDImage" />
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          size="sm"
-                                          onClick={async () => {
-                                            const inputElement = document.querySelector(
-                                              'input[name="optionDImage"]',
-                                            ) as HTMLInputElement
-                                            const fileInput = document.createElement("input")
-                                            fileInput.type = "file"
-                                            fileInput.accept = "image/*"
-                                            fileInput.onchange = async (e) => {
-                                              const file = (e.target as HTMLInputElement).files?.[0]
-                                              if (file) {
-                                                const imageData = await handleImageUpload(e as any)
-                                                if (inputElement) inputElement.value = imageData
-                                                setEditFormData({
-                                                  ...editFormData,
-                                                  optionDImage: imageData,
-                                                  optionD: "", // Clear the text when image is uploaded
-                                                })
-                                              }
-                                            }
-                                            fileInput.click()
-                                          }}
-                                          className="text-xs"
-                                        >
-                                          <Upload className="h-3 w-3 mr-1" />
-                                          Img
-                                        </Button>
-                                        {editFormData.optionDImage && (
-                                          <div className="mt-2 relative inline-block">
-                                            <img
-                                              src={editFormData.optionDImage || "/placeholder.svg"}
-                                              alt="Optie D"
-                                              className="max-w-[150px] rounded border"
-                                            />
-                                            <Button
-                                              variant="destructive"
-                                              size="sm"
-                                              className="absolute top-0 right-0"
-                                              onClick={() => setEditFormData({ ...editFormData, optionDImage: "" })}
-                                            >
-                                              <X className="h-2 w-2" />
-                                            </Button>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="flex gap-2 justify-end">
-                                  <Button onClick={handleSaveInlineEdit} size="sm" isSaving={isSaving}>
-                                    {isSaving ? "Opslaan..." : "Opslaan"}
-                                  </Button>
-                                  <Button variant="outline" size="sm" onClick={handleCancelEdit}>
-                                    Annuleren
-                                  </Button>
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                <p className="font-medium">{question.question}</p>
-                                <div className="space-y-2 text-sm">
-                                  {question.options.a && (
-                                    <p
-                                      onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "a")}
-                                      className={cn(
-                                        "flex items-center gap-2",
-                                        getDisplayCorrectAnswer(question) === "A" && "text-green-600 font-semibold",
-                                        isBulkEditMode &&
-                                          "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
-                                      )}
-                                    >
-                                      <span className="font-semibold">A:</span> {question.options.a}
-                                      {question.optionImages?.a && (
-                                        <img
-                                          src={question.optionImages.a || "/placeholder.svg"}
-                                          alt="Optie A"
-                                          className="max-w-[100px] max-h-12 rounded border"
-                                        />
-                                      )}
-                                    </p>
-                                  )}
-                                  {question.options.b && (
-                                    <p
-                                      onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "b")}
-                                      className={cn(
-                                        "flex items-center gap-2",
-                                        getDisplayCorrectAnswer(question) === "B" && "text-green-600 font-semibold",
-                                        isBulkEditMode &&
-                                          "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
-                                      )}
-                                    >
-                                      <span className="font-semibold">B:</span> {question.options.b}
-                                      {question.optionImages?.b && (
-                                        <img
-                                          src={question.optionImages.b || "/placeholder.svg"}
-                                          alt="Optie B"
-                                          className="max-w-[1100px] max-h-12 rounded border"
-                                        />
-                                      )}
-                                    </p>
-                                  )}
-                                  {question.options.c && (
-                                    <p
-                                      onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "c")}
-                                      className={cn(
-                                        "flex items-center gap-2",
-                                        getDisplayCorrectAnswer(question) === "C" && "text-green-600 font-semibold",
-                                        isBulkEditMode &&
-                                          "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
-                                      )}
-                                    >
-                                      <span className="font-semibold">C:</span> {question.options.c}
-                                      {question.optionImages?.c && (
-                                        <img
-                                          src={question.optionImages.c || "/placeholder.svg"}
-                                          alt="Optie C"
-                                          className="max-w-[100px] max-h-12 rounded border"
-                                        />
-                                      )}
-                                    </p>
-                                  )}
-                                  {question.options.d && (
-                                    <p
-                                      onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "d")}
-                                      className={cn(
-                                        "flex items-center gap-2",
-                                        getDisplayCorrectAnswer(question) === "D" && "text-green-600 font-semibold",
-                                        isBulkEditMode &&
-                                          "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
-                                      )}
-                                    >
-                                      <span className="font-semibold">D:</span> {question.options.d}
-                                      {question.optionImages?.d && (
-                                        <img
-                                          src={question.optionImages.d || "/placeholder.svg"}
-                                          alt="Optie D"
-                                          className="max-w-[100px] max-h-12 rounded border"
-                                        />
-                                      )}
-                                    </p>
-                                  )}
-                                </div>
-                                {question.questionImage && (
-                                  <div className="mt-3">
-                                    <img
-                                      src={question.questionImage || "/placeholder.svg"}
-                                      alt="Vraag afbeelding"
-                                      className="max-w-xs rounded border"
-                                    />
-                                  </div>
-                                )}
-                                {needsImage && hasImageDescription && (
-                                  <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded text-xs text-red-800">
-                                    <span>📷 Afbeelding vereist: {question.imageDescription}</span>
-                                  </div>
-                                )}
-                                {needsOptionImages && (
-                                  <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded text-xs text-red-800">
-                                    <span>📷 Afbeeldingen vereist in antwoord opties</span>
-                                  </div>
-                                )}
-                                {hasEdit && (
-                                  <div className="mt-3 text-xs text-amber-700 italic">✓ Deze vraag is aangepast.</div>
-                                )}
-                              </>
-                            )}
-                          </div>
-
-                          <div className="flex flex-col gap-2">
-                            {!isEditing && (
-                              <>
-                                <Button variant="ghost" size="sm" onClick={() => handleStartEdit(question)}>
-                                  <Pencil className="w-4 h-4" />
-                                </Button>
-                                <Button variant="ghost" size="sm" onClick={() => handleDeleteQuestion(question.id)}>
-                                  <Trash2 className="w-4 h-4 text-destructive" />
-                                </Button>
-                                {hasEdit && (
-                                  <Button variant="ghost" size="sm" onClick={() => handleDeleteEdit(editKey)}>
-                                    <X className="w-4 h-4 text-gray-500" />
-                                  </Button>
-                                )}
-                              </>
-                            )}
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Button
+                              variant={question.needsReview ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => handleToggleReviewFlag(question.id)}
+                              title={question.needsReview ? "Markering verwijderen" : "Markeren om na te kijken"}
+                            >
+                              <Flag className={cn("w-4 h-4", question.needsReview && "fill-current")} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                if (isEditing) {
+                                  setEditingQuestionId(null)
+                                  setEditFormData(null) // Clear edit form data
+                                } else {
+                                  handleEditClick(question)
+                                }
+                              }}
+                            >
+                              {isEditing ? <X className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleDeleteQuestion(question.id)}>
+                              <Trash2 className="w-4 h-4 text-destructive" />
+                            </Button>
                           </div>
                         </div>
-                      </div>
-                    )
-                  })}
-                  {filteredQuestions.length === 0 && (
-                    <p className="text-center text-muted-foreground py-8">Geen vragen gevonden met deze filters.</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
+
+                        <div className="flex space-x-4 mt-4 text-sm text-muted-foreground">
+                          <span>Reeks: {question.reeks}</span>
+                          {question.questionImage && <span>Afbeelding</span>}
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        {isEditing && editFormData ? (
+                          <div className="space-y-4 border-t pt-4 bg-muted/50 p-4 rounded-lg">
+                            <div className="space-y-2">
+                              <Label>Vraag</Label>
+                              <Textarea
+                                rows={3}
+                                value={editFormData.question}
+                                onChange={(e) => setEditFormData({ ...editFormData, question: e.target.value })}
+                                className="mt-1"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Vraag afbeelding (optioneel)</Label>
+                              <div className="flex gap-2">
+                                <Input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0]
+                                    if (file) {
+                                      const url = await handleImageUpload(e as any) // Assuming handleImageUpload can take the event
+                                      if (url) {
+                                        setEditFormData({ ...editFormData, questionImage: url })
+                                      }
+                                    }
+                                  }}
+                                  className="hidden"
+                                  id={`question-image-${question.id}`}
+                                />
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => document.getElementById(`question-image-${question.id}`)?.click()}
+                                >
+                                  <Upload className="w-4 h-4 mr-2" />
+                                  Afbeelding uploaden
+                                </Button>
+                                {editFormData.questionImage && (
+                                  <span className="text-sm text-muted-foreground flex items-center">
+                                    Afbeelding geselecteerd
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Antwoorden (klik op het juiste antwoord)</Label>
+                              <div className="space-y-2">
+                                {[
+                                  {
+                                    key: "a",
+                                    label: "A",
+                                    text: editFormData.optionA,
+                                    image: editFormData.optionAImage,
+                                  },
+                                  {
+                                    key: "b",
+                                    label: "B",
+                                    text: editFormData.optionB,
+                                    image: editFormData.optionBImage,
+                                  },
+                                  {
+                                    key: "c",
+                                    label: "C",
+                                    text: editFormData.optionC,
+                                    image: editFormData.optionCImage,
+                                  },
+                                  {
+                                    key: "d",
+                                    label: "D",
+                                    text: editFormData.optionD,
+                                    image: editFormData.optionDImage,
+                                  },
+                                ].map((option) => (
+                                  <div key={option.key} className="space-y-1">
+                                    <div className="flex items-start gap-2">
+                                      <div
+                                        onClick={() =>
+                                          setEditFormData({
+                                            ...editFormData,
+                                            correct: option.key as "a" | "b" | "c" | "d",
+                                          })
+                                        }
+                                        className={cn(
+                                          "flex-1 p-3 rounded border cursor-pointer transition-colors",
+                                          editFormData.correct === option.key
+                                            ? "bg-green-100 border-green-500 text-green-900"
+                                            : "bg-background hover:bg-muted",
+                                        )}
+                                      >
+                                        <div className="font-semibold text-sm mb-1">{option.label}:</div>
+                                        <div className="text-sm">{option.text}</div>
+                                      </div>
+
+                                      <div>
+                                        <Input
+                                          type="file"
+                                          accept="image/*"
+                                          onChange={async (e) => {
+                                            const file = e.target.files?.[0]
+                                            if (file) {
+                                              const url = await handleImageUpload(e as any) // Assuming handleImageUpload can take the event
+                                              if (url) {
+                                                setEditFormData({
+                                                  ...editFormData,
+                                                  [`option${option.label}Image`]: url,
+                                                })
+                                              }
+                                            }
+                                          }}
+                                          className="hidden"
+                                          id={`option-${option.key}-image-${question.id}`}
+                                        />
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() =>
+                                            document
+                                              .getElementById(`option-${option.key}-image-${question.id}`)
+                                              ?.click()
+                                          }
+                                        >
+                                          Img
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="flex gap-2 pt-2">
+                              <Button onClick={handleSaveInlineEdit} variant="default" size="sm">
+                                Opslaan
+                              </Button>
+                              <Button
+                                onClick={() => {
+                                  setEditingQuestionId(null)
+                                  setEditFormData(null)
+                                }}
+                                variant="outline"
+                                size="sm"
+                              >
+                                Annuleren
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {(question.options?.a || question.optionImages?.a) && (
+                              <p
+                                onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "a")}
+                                className={cn(
+                                  "flex items-center gap-2",
+                                  getDisplayCorrectAnswer(question) === "A" && "text-green-600 font-semibold",
+                                  isBulkEditMode && "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
+                                )}
+                              >
+                                <span className="font-semibold">A:</span>{" "}
+                                {question.optionImages?.a
+                                  ? question.options?.a && !question.options.a.toLowerCase().includes("[afbeelding")
+                                    ? question.options.a
+                                    : ""
+                                  : question.options?.a || ""}
+                                {question.optionImages?.a && (
+                                  <img
+                                    src={question.optionImages.a || "/placeholder.svg"}
+                                    alt="Optie A"
+                                    className="max-w-[100px] max-h-12 rounded border"
+                                  />
+                                )}
+                              </p>
+                            )}
+                            {(question.options?.b || question.optionImages?.b) && (
+                              <p
+                                onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "b")}
+                                className={cn(
+                                  "flex items-center gap-2",
+                                  getDisplayCorrectAnswer(question) === "B" && "text-green-600 font-semibold",
+                                  isBulkEditMode && "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
+                                )}
+                              >
+                                <span className="font-semibold">B:</span>{" "}
+                                {question.optionImages?.b
+                                  ? question.options?.b && !question.options.b.toLowerCase().includes("[afbeelding")
+                                    ? question.options.b
+                                    : ""
+                                  : question.options?.b || ""}
+                                {question.optionImages?.b && (
+                                  <img
+                                    src={question.optionImages.b || "/placeholder.svg"}
+                                    alt="Optie B"
+                                    className="max-w-[100px] max-h-12 rounded border"
+                                  />
+                                )}
+                              </p>
+                            )}
+                            {(question.options?.c || question.optionImages?.c) && (
+                              <p
+                                onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "c")}
+                                className={cn(
+                                  "flex items-center gap-2",
+                                  getDisplayCorrectAnswer(question) === "C" && "text-green-600 font-semibold",
+                                  isBulkEditMode && "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
+                                )}
+                              >
+                                <span className="font-semibold">C:</span>{" "}
+                                {question.optionImages?.c
+                                  ? question.options?.c && !question.options.c.toLowerCase().includes("[afbeelding")
+                                    ? question.options.c
+                                    : ""
+                                  : question.options?.c || ""}
+                                {question.optionImages?.c && (
+                                  <img
+                                    src={question.optionImages.c || "/placeholder.svg"}
+                                    alt="Optie C"
+                                    className="max-w-[100px] max-h-12 rounded border"
+                                  />
+                                )}
+                              </p>
+                            )}
+                            {(question.options?.d || question.optionImages?.d) && (
+                              <p
+                                onClick={() => isBulkEditMode && handleBulkAnswerClick(question.id, "d")}
+                                className={cn(
+                                  "flex items-center gap-2",
+                                  getDisplayCorrectAnswer(question) === "D" && "text-green-600 font-semibold",
+                                  isBulkEditMode && "cursor-pointer hover:bg-gray-100 p-2 rounded transition-colors",
+                                )}
+                              >
+                                <span className="font-semibold">D:</span>{" "}
+                                {question.optionImages?.d
+                                  ? question.options?.d && !question.options.d.toLowerCase().includes("[afbeelding")
+                                    ? question.options.d
+                                    : ""
+                                  : question.options?.d || ""}
+                                {question.optionImages?.d && (
+                                  <img
+                                    src={question.optionImages.d || "/placeholder.svg"}
+                                    alt="Optie D"
+                                    className="max-w-[100px] max-h-12 rounded border"
+                                  />
+                                )}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        {question.questionImage && (
+                          <div className="mt-3">
+                            <img
+                              src={question.questionImage || "/placeholder.svg"}
+                              alt="Vraag afbeelding"
+                              className="max-w-xs rounded border"
+                            />
+                          </div>
+                        )}
+                        {/* Removed needsImage and imageDescription check for display as it's handled in upload modal */}
+                        {/* {needsImage && hasImageDescription && (
+                          <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded text-xs text-red-800">
+                            <span>📷 Afbeelding vereist: {question.imageDescription}</span>
+                          </div>
+                        )} */}
+                        {/* Removed needsOptionImages check for display */}
+                        {/* {needsOptionImages && (
+                          <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded text-xs text-red-800">
+                            <span>📷 Afbeeldingen vereist in antwoord opties</span>
+                          </div>
+                        )} */}
+                        {/* Removed "hasEdit" check display */}
+                        {/* {hasEdit && (
+                          <div className="mt-3 text-xs text-amber-700 italic">✓ Deze vraag is aangepast.</div>
+                        )} */}
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+                {filteredQuestions.length === 0 && (
+                  <p className="text-center text-muted-foreground py-8">Geen vragen gevonden met deze filters.</p>
+                )}
+              </div>
+            </CardContent>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={showManualQuestionForm} onOpenChange={setShowManualQuestionForm}>
           <DialogContent className="max-w-3xl">
@@ -4196,49 +4148,47 @@ export default function AdminPage() {
           </DialogContent>
         </Dialog>
 
-        {showPdfUploadInOverview && (
-          <Dialog open={showPdfUploadInOverview} onOpenChange={setShowPdfUploadInOverview}>
-            <DialogContent className="max-w-3xl">
-              <DialogHeader>
-                <DialogTitle>Upload PDF</DialogTitle>
-                <DialogDescription>Upload een PDF-bestand om vragen te extraheren.</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div className="border rounded-lg p-4 text-center">
-                  <label
-                    htmlFor="pdfFile"
-                    className="cursor-pointer flex flex-col items-center justify-center space-y-2 py-6"
-                  >
-                    <Upload className="h-8 w-8 text-primary" />
-                    <span className="text-sm font-medium">Klik om PDF te selecteren</span>
-                    <span className="text-xs text-muted-foreground">Ondersteund: PDF</span>
-                  </label>
-                  <input id="pdfFile" type="file" accept=".pdf" onChange={handlePdfUpload} className="hidden" />
-                  {isProcessingPdf && (
-                    <div className="mt-4 text-center space-y-2">
-                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto" />
-                      <p className="text-sm text-muted-foreground">PDF verwerken...</p>
-                    </div>
-                  )}
-                </div>
-
-                {questionsText && (
-                  <>
-                    <h3 className="font-semibold">Geëxtraheerde tekst:</h3>
-                    <Textarea
-                      value={questionsText}
-                      onChange={(e) => setQuestionsText(e.target.value)}
-                      className="min-h-[150px] font-mono text-sm"
-                    />
-                    <Button onClick={handleParseTextInOverview} className="w-full">
-                      Tekst Parset voor Review
-                    </Button>
-                  </>
+        <Dialog open={showPdfUploadInOverview} onOpenChange={setShowPdfUploadInOverview}>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Upload PDF</DialogTitle>
+              <DialogDescription>Upload een PDF-bestand om vragen te extraheren.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="border rounded-lg p-4 text-center">
+                <label
+                  htmlFor="pdfFile"
+                  className="cursor-pointer flex flex-col items-center justify-center space-y-2 py-6"
+                >
+                  <Upload className="h-8 w-8 text-primary" />
+                  <span className="text-sm font-medium">Klik om PDF te selecteren</span>
+                  <span className="text-xs text-muted-foreground">Ondersteund: PDF</span>
+                </label>
+                <input id="pdfFile" type="file" accept=".pdf" onChange={handlePdfUpload} className="hidden" />
+                {isProcessingPdf && (
+                  <div className="mt-4 text-center space-y-2">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto" />
+                    <p className="text-sm text-muted-foreground">PDF verwerken...</p>
+                  </div>
                 )}
               </div>
-            </DialogContent>
-          </Dialog>
-        )}
+
+              {questionsText && (
+                <>
+                  <h3 className="font-semibold">Geëxtraheerde tekst:</h3>
+                  <Textarea
+                    value={questionsText}
+                    onChange={(e) => setQuestionsText(e.target.value)}
+                    className="min-h-[150px] font-mono text-sm"
+                  />
+                  <Button onClick={handleParseTextInOverview} className="w-full">
+                    Tekst Parset voor Review
+                  </Button>
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {showReeksUpdate && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
