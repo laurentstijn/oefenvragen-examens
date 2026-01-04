@@ -906,11 +906,9 @@ export default function AdminPage() {
 
     if (imageFilter === "missing") {
       result = result.filter((q) => {
-        const needsImage = !q.image && !q.questionImage
-        const hasImageDescription = q.imageDescription
-        const hasOptionImages = q.optionsHaveImages
-        const optionImagesExist = q.optionImages && Object.keys(q.optionImages).length > 0
-        return (needsImage && hasImageDescription) || (hasOptionImages && !optionImagesExist)
+        const needsQuestionImage = q.needsImage && !q.questionImage && !q.image
+        const needsOptionImages = q.optionsHaveImages && (!q.optionImages || Object.keys(q.optionImages).length === 0)
+        return needsQuestionImage || needsOptionImages
       })
     } else if (imageFilter === "has") {
       result = result.filter((q) => {
@@ -933,15 +931,13 @@ export default function AdminPage() {
   }, [
     selectedCategory,
     firebaseQuestions,
-    // Removed savedEdits from dependency array
-    // savedEdits,
     deletedQuestions,
     searchTerm,
     selectedQuestionSet,
-    imageFilter, // Updated from showOnlyMissingImages
-    showOnlyFlagged, // Added to dependencies
-    bulkEditTrigger, // Add trigger as dependency to force recalculation
-    bulkEditAnswers, // Add bulkEditAnswers to dependency array
+    imageFilter,
+    showOnlyFlagged,
+    bulkEditTrigger,
+    bulkEditAnswers,
   ])
 
   const getQuestionCountForSet = (reeksId: string) => {
@@ -1653,7 +1649,7 @@ export default function AdminPage() {
     }
   }
 
-  const handleSaveInlineEdit = async () => {
+  const handleSaveInlineEdit = async (question: Question) => {
     if (!editingQuestionId || !editFormData) return
 
     console.log("[v0] Saving inline edit for question:", editingQuestionId)
@@ -3040,7 +3036,7 @@ export default function AdminPage() {
                     {editableParsedQuestions.map((q) => (
                       <div
                         key={q.number}
-                        className={`border rounded-lg p-4 transition-all ${
+                        className={`border rounded-lg p-4 transition-all duration-200 hover:shadow-md ${
                           q.needsImage || q.optionsHaveImages ? "border-red-300 bg-red-50" : ""
                         }`}
                       >
@@ -3449,13 +3445,19 @@ export default function AdminPage() {
                   const isDeleted = deletedQuestions.has(question.firebaseKey)
                   const isEditing = editingQuestionId === question.id // Check if this question is currently being edited
 
+                  const needsImage = question.needsImage && !question.questionImage && !question.image
+                  const needsOptionImages =
+                    question.optionsHaveImages &&
+                    (!question.optionImages || Object.keys(question.optionImages).length === 0)
+                  const hasMissingImages = needsImage || needsOptionImages
+
                   return (
                     <Card
                       key={question.id}
                       className={cn(
                         "relative transition-all duration-200 hover:shadow-md",
-                        isDeleted && "opacity-50 pointer-events-none",
                         question.needsReview && "border-amber-500 border-2", // Visual indicator for flagged questions
+                        hasMissingImages ? "border-red-400 bg-red-50" : "",
                       )}
                     >
                       <CardHeader className="pb-4">
@@ -3502,27 +3504,24 @@ export default function AdminPage() {
                       </CardHeader>
                       <CardContent>
                         {isEditing && editFormData ? (
-                          <div className="space-y-4 border-t pt-4 bg-muted/50 p-4 rounded-lg">
+                          <div className="mt-4 space-y-4 border-t pt-4">
                             <div className="space-y-2">
-                              <Label>Vraag</Label>
+                              <Label htmlFor={`edit-question-${question.id}`}>Vraag</Label>
                               <Textarea
-                                rows={3}
+                                id={`edit-question-${question.id}`}
                                 value={editFormData.question}
                                 onChange={(e) => setEditFormData({ ...editFormData, question: e.target.value })}
-                                className="mt-1"
+                                rows={3}
                               />
-                            </div>
 
-                            <div className="space-y-2">
-                              <Label>Vraag afbeelding (optioneel)</Label>
-                              <div className="flex gap-2">
-                                <Input
+                              <div className="space-y-2">
+                                <input
                                   type="file"
                                   accept="image/*"
                                   onChange={async (e) => {
                                     const file = e.target.files?.[0]
                                     if (file) {
-                                      const url = await handleImageUpload(e as any) // Assuming handleImageUpload can take the event
+                                      const url = await handleImageUpload(e as any)
                                       if (url) {
                                         setEditFormData({ ...editFormData, questionImage: url })
                                       }
@@ -3541,9 +3540,13 @@ export default function AdminPage() {
                                   Afbeelding uploaden
                                 </Button>
                                 {editFormData.questionImage && (
-                                  <span className="text-sm text-muted-foreground flex items-center">
-                                    Afbeelding geselecteerd
-                                  </span>
+                                  <div className="mt-2">
+                                    <img
+                                      src={editFormData.questionImage || "/placeholder.svg"}
+                                      alt="Vraag afbeelding"
+                                      className="max-w-xs max-h-32 object-contain border rounded"
+                                    />
+                                  </div>
                                 )}
                               </div>
                             </div>
@@ -3577,76 +3580,71 @@ export default function AdminPage() {
                                     image: editFormData.optionDImage,
                                   },
                                 ].map((option) => (
-                                  <div key={option.key} className="space-y-1">
-                                    <div className="flex items-start gap-2">
-                                      <div
-                                        onClick={() =>
-                                          setEditFormData({
-                                            ...editFormData,
-                                            correct: option.key as "a" | "b" | "c" | "d",
-                                          })
-                                        }
-                                        className={cn(
-                                          "flex-1 p-3 rounded border cursor-pointer transition-colors",
-                                          editFormData.correct === option.key
-                                            ? "bg-green-100 border-green-500 text-green-900"
-                                            : "bg-background hover:bg-muted",
-                                        )}
-                                      >
-                                        <div className="font-semibold text-sm mb-1">{option.label}:</div>
-                                        <div className="text-sm">{option.text}</div>
+                                  <div key={option.key} className="space-y-2">
+                                    <div
+                                      className={`p-3 rounded border cursor-pointer transition-colors ${
+                                        editFormData.correct === option.key
+                                          ? "bg-green-100 border-green-500"
+                                          : "hover:bg-gray-50"
+                                      }`}
+                                      onClick={() =>
+                                        setEditFormData({
+                                          ...editFormData,
+                                          correct: option.key as "a" | "b" | "c" | "d",
+                                        })
+                                      }
+                                    >
+                                      <div className="flex items-start gap-2">
+                                        <span className="font-semibold">{option.label}:</span>
+                                        <span className="flex-1">{option.text}</span>
                                       </div>
+                                    </div>
 
-                                      <div>
-                                        <Input
-                                          type="file"
-                                          accept="image/*"
-                                          onChange={async (e) => {
-                                            const file = e.target.files?.[0]
-                                            if (file) {
-                                              const url = await handleImageUpload(e as any) // Assuming handleImageUpload can take the event
-                                              if (url) {
-                                                setEditFormData({
-                                                  ...editFormData,
-                                                  [`option${option.label}Image`]: url,
-                                                })
-                                              }
+                                    <div className="ml-6 flex items-center gap-2">
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={async (e) => {
+                                          const file = e.target.files?.[0]
+                                          if (file) {
+                                            const url = await handleImageUpload(e as any)
+                                            if (url) {
+                                              setEditFormData({
+                                                ...editFormData,
+                                                [`option${option.label}Image`]: url,
+                                              })
                                             }
-                                          }}
-                                          className="hidden"
-                                          id={`option-${option.key}-image-${question.id}`}
-                                        />
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          size="sm"
-                                          onClick={() =>
-                                            document
-                                              .getElementById(`option-${option.key}-image-${question.id}`)
-                                              ?.click()
                                           }
-                                        >
-                                          Img
-                                        </Button>
-                                      </div>
+                                        }}
+                                        className="hidden"
+                                        id={`option-${option.key}-image-${question.id}`}
+                                      />
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() =>
+                                          document.getElementById(`option-${option.key}-image-${question.id}`)?.click()
+                                        }
+                                      >
+                                        Img
+                                      </Button>
+                                      {option.image && (
+                                        <img
+                                          src={option.image || "/placeholder.svg"}
+                                          alt={`Optie ${option.label}`}
+                                          className="max-w-[80px] max-h-[80px] object-contain border rounded"
+                                        />
+                                      )}
                                     </div>
                                   </div>
                                 ))}
                               </div>
                             </div>
 
-                            <div className="flex gap-2 pt-2">
-                              <Button onClick={handleSaveInlineEdit} variant="default" size="sm">
-                                Opslaan
-                              </Button>
-                              <Button
-                                onClick={() => {
-                                  setEditingQuestionId(null)
-                                  setEditFormData(null)
-                                }}
-                                variant="outline"
-                                size="sm"
-                              >
+                            <div className="flex gap-2">
+                              <Button onClick={() => handleSaveInlineEdit(question)}>Opslaan</Button>
+                              <Button variant="outline" onClick={() => setEditingQuestionId(null)}>
                                 Annuleren
                               </Button>
                             </div>
