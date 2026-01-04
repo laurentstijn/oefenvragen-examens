@@ -3558,26 +3558,34 @@ export default function AdminPage() {
                                   {
                                     key: "a",
                                     label: "A",
-                                    text: editFormData.optionA,
+                                    value: editFormData.optionA,
                                     image: editFormData.optionAImage,
+                                    field: "optionA" as const,
+                                    imageField: "optionAImage" as const,
                                   },
                                   {
                                     key: "b",
                                     label: "B",
-                                    text: editFormData.optionB,
+                                    value: editFormData.optionB,
                                     image: editFormData.optionBImage,
+                                    field: "optionB" as const,
+                                    imageField: "optionBImage" as const,
                                   },
                                   {
                                     key: "c",
                                     label: "C",
-                                    text: editFormData.optionC,
+                                    value: editFormData.optionC,
                                     image: editFormData.optionCImage,
+                                    field: "optionC" as const,
+                                    imageField: "optionCImage" as const,
                                   },
                                   {
                                     key: "d",
                                     label: "D",
-                                    text: editFormData.optionD,
+                                    value: editFormData.optionD,
                                     image: editFormData.optionDImage,
+                                    field: "optionD" as const,
+                                    imageField: "optionDImage" as const,
                                   },
                                 ].map((option) => (
                                   <div key={option.key} className="space-y-2">
@@ -3596,7 +3604,18 @@ export default function AdminPage() {
                                     >
                                       <div className="flex items-start gap-2">
                                         <span className="font-semibold">{option.label}:</span>
-                                        <span className="flex-1">{option.text}</span>
+                                        <Textarea
+                                          value={option.value}
+                                          onChange={(e) =>
+                                            setEditFormData({
+                                              ...editFormData,
+                                              [option.field]: e.target.value,
+                                            })
+                                          }
+                                          onClick={(e) => e.stopPropagation()}
+                                          rows={2}
+                                          className="flex-1 bg-white"
+                                        />
                                       </div>
                                     </div>
 
@@ -3611,7 +3630,7 @@ export default function AdminPage() {
                                             if (url) {
                                               setEditFormData({
                                                 ...editFormData,
-                                                [`option${option.label}Image`]: url,
+                                                [option.imageField]: url,
                                               })
                                             }
                                           }
