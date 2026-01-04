@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label"
 
 import type React from "react"
 import { useToast } from "@/components/ui/use-toast"
-import { Trash2, X, Plus, FileText, Upload, Pencil, Download, RotateCcw, Flag } from "lucide-react" // Added Flag icon
+import { Trash2, X, Plus, FileText, Upload, Pencil, Download, RotateCcw, Flag, FileDown } from "lucide-react" // Added Flag icon, FileDown, Edit icons
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -59,6 +59,8 @@ import { getAuth } from "firebase/auth" // Import getAuth
 // FIX: The type Question was undeclared. Imported it from a relevant module.
 import type { Question } from "@/lib/types"
 // --- FIX END ---
+
+import { jsPDF } from "jspdf"
 
 const sanitizeForLog = (obj: any): any => {
   if (!obj) return obj
@@ -890,9 +892,9 @@ export default function AdminPage() {
       const term = searchTerm.toLowerCase()
       result = result.filter(
         (q) =>
-          q.question.toLowerCase().includes(term) ||
-          Object.values(q.options).some((opt) => opt && opt.toLowerCase().includes(term)) ||
-          q.id.toString().includes(term),
+          (q.question && q.question.toLowerCase().includes(term)) ||
+          (q.options && Object.values(q.options).some((opt) => opt && opt.toLowerCase().includes(term))) ||
+          (q.id && q.id.toString().includes(term)),
       )
     }
 
@@ -2411,7 +2413,10 @@ export default function AdminPage() {
   }
 
   const handleExportCategoryBackup = async () => {
-    if (!selectedCategory) return
+    if (!selectedCategory || selectedQuestionSet === "all") {
+      alert("Selecteer eerst een specifieke reeks om te exporteren naar PDF.")
+      return
+    }
 
     try {
       const allQuestions = await getAllQuestions(selectedCategory)
@@ -2705,6 +2710,132 @@ export default function AdminPage() {
     }
   }
 
+  const handleExportReeksToPDF = async () => {
+    if (!selectedCategory || selectedQuestionSet === "all") {
+      alert("Selecteer eerst een specifieke reeks om te exporteren naar PDF.")
+      return
+    }
+
+    try {
+      const pdf = new jsPDF()
+      const pageWidth = pdf.internal.pageSize.getWidth()
+      const pageHeight = pdf.internal.pageSize.getHeight()
+      const margin = 20
+      const contentWidth = pageWidth - 2 * margin
+      let yPosition = margin
+
+      // Title
+      pdf.setFontSize(16)
+      pdf.text(`${selectedCategory} - ${selectedQuestionSet}`, margin, yPosition)
+      yPosition += 10
+
+      pdf.setFontSize(10)
+      pdf.text(`Gegenereerd: ${new Date().toLocaleDateString("nl-NL")}`, margin, yPosition)
+      yPosition += 15
+
+      // Filter questions for selected reeks
+      const reeksQuestions = filteredQuestions.filter(
+        (q) => normalizeReeks(q.reeks) === normalizeReeks(selectedQuestionSet),
+      )
+
+      for (let i = 0; i < reeksQuestions.length; i++) {
+        const question = reeksQuestions[i]
+
+        // Check if we need a new page
+        if (yPosition > pageHeight - 60) {
+          pdf.addPage()
+          yPosition = margin
+        }
+
+        // Question number and text
+        pdf.setFontSize(12)
+        pdf.setFont(undefined, "bold")
+        const questionText = `${question.id}. ${question.question}`
+        const questionLines = pdf.splitTextToSize(questionText, contentWidth)
+        pdf.text(questionLines, margin, yPosition)
+        yPosition += questionLines.length * 7
+
+        // Question image if exists
+        if (question.questionImage || question.image) {
+          try {
+            const imgData = question.questionImage || question.image
+            if (imgData) {
+              // Check if we need a new page for image
+              if (yPosition > pageHeight - 80) {
+                pdf.addPage()
+                yPosition = margin
+              }
+
+              const imgWidth = 80
+              const imgHeight = 60
+              pdf.addImage(imgData, "JPEG", margin, yPosition, imgWidth, imgHeight)
+              yPosition += imgHeight + 10
+            }
+          } catch (error) {
+            console.error("Error adding question image:", error)
+          }
+        }
+
+        // Answer options
+        pdf.setFont(undefined, "normal")
+        pdf.setFontSize(11)
+        const options = ["a", "b", "c", "d"]
+
+        for (const opt of options) {
+          if (yPosition > pageHeight - 40) {
+            pdf.addPage()
+            yPosition = margin
+          }
+
+          const optionText = question.options[opt] || ""
+          const isCorrect = question.correctAnswer === opt.toUpperCase()
+
+          if (isCorrect) {
+            pdf.setTextColor(0, 150, 0) // Green for correct answer
+            pdf.setFont(undefined, "bold")
+          }
+
+          const optionLine = `${opt.toUpperCase()}: ${optionText}`
+          const optionLines = pdf.splitTextToSize(optionLine, contentWidth - 30)
+          pdf.text(optionLines, margin + 5, yPosition)
+          yPosition += optionLines.length * 6
+
+          // Option image if exists
+          if (question.optionImages && question.optionImages[opt]) {
+            try {
+              if (yPosition > pageHeight - 50) {
+                pdf.addPage()
+                yPosition = margin
+              }
+
+              const imgWidth = 40
+              const imgHeight = 30
+              pdf.addImage(question.optionImages[opt], "JPEG", margin + 10, yPosition, imgWidth, imgHeight)
+              yPosition += imgHeight + 5
+            } catch (error) {
+              console.error("Error adding option image:", error)
+            }
+          }
+
+          // Reset text color and font
+          pdf.setTextColor(0, 0, 0)
+          pdf.setFont(undefined, "normal")
+        }
+
+        yPosition += 10 // Space between questions
+      }
+
+      // Save PDF
+      const fileName = `${selectedCategory}-${selectedQuestionSet}-${new Date().toISOString().split("T")[0]}.pdf`
+      pdf.save(fileName)
+
+      alert(`PDF succesvol geëxporteerd: ${reeksQuestions.length} vragen`)
+    } catch (error) {
+      console.error("Error exporting to PDF:", error)
+      alert("Er is een fout opgetreden bij het exporteren naar PDF.")
+    }
+  }
+
   return (
     <div className="min-h-screen">
       <div className="max-w-7xl mx-auto px-4 py-8">
@@ -2900,7 +3031,7 @@ export default function AdminPage() {
                         type="file"
                         accept="image/*"
                         onChange={(e) => handleCategoryIconUpload(e.target.files?.[0] || null)}
-                        className="text-sm"
+                        className="hidden"
                       />
                       {newCategoryIconPreview && (
                         <div className="w-12 h-12 border rounded flex items-center justify-center bg-muted">
@@ -3359,7 +3490,10 @@ export default function AdminPage() {
                 <Input
                   placeholder="Zoek op nummer, tekst of optie..."
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={(e) => {
+                    console.log("[v0] Search term changed:", e.target.value)
+                    setSearchTerm(e.target.value)
+                  }}
                 />
               </div>
 
@@ -3434,6 +3568,16 @@ export default function AdminPage() {
                   >
                     <Trash2 className="h-4 w-4" />
                     Reeks Verwijderen
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExportReeksToPDF}
+                    className="gap-2 bg-transparent"
+                    disabled={selectedQuestionSet === "all"}
+                  >
+                    <FileDown className="h-4 w-4" />
+                    Reeks als PDF Exporteren
                   </Button>
                 </div>
               </div>
@@ -3649,11 +3793,24 @@ export default function AdminPage() {
                                         Img
                                       </Button>
                                       {option.image && (
-                                        <img
-                                          src={option.image || "/placeholder.svg"}
-                                          alt={`Optie ${option.label}`}
-                                          className="max-w-[80px] max-h-[80px] object-contain border rounded"
-                                        />
+                                        <div className="mt-2 relative inline-block">
+                                          <img
+                                            src={option.image || "/placeholder.svg"}
+                                            alt={`Optie ${option.label}`}
+                                            className="max-w-[80px] max-h-[80px] object-contain border rounded"
+                                          />
+                                          <Button
+                                            variant="destructive"
+                                            size="sm"
+                                            className="absolute top-0 right-0"
+                                            onClick={(e) => {
+                                              setEditFormData({ ...editFormData, [option.imageField]: "" })
+                                              e.stopPropagation()
+                                            }}
+                                          >
+                                            <X className="h-2 w-2" />
+                                          </Button>
+                                        </div>
                                       )}
                                     </div>
                                   </div>
