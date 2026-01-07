@@ -2787,7 +2787,12 @@ export default function AdminPage() {
             yPosition = margin
           }
 
+          // Check if options exist before accessing
+          if (!question.options) continue
+
           const optionText = question.options[opt] || ""
+          if (!optionText) continue // Skip empty options
+
           const isCorrect = question.correctAnswer === opt.toUpperCase()
 
           if (isCorrect) {
@@ -2800,7 +2805,7 @@ export default function AdminPage() {
           pdf.text(optionLines, margin + 5, yPosition)
           yPosition += optionLines.length * 6
 
-          // Option image if exists
+          // Option image if exists - check optionImages exists first
           if (question.optionImages && question.optionImages[opt]) {
             try {
               if (yPosition > pageHeight - 50) {
@@ -2832,7 +2837,7 @@ export default function AdminPage() {
       alert(`PDF succesvol geëxporteerd: ${reeksQuestions.length} vragen`)
     } catch (error) {
       console.error("Error exporting to PDF:", error)
-      alert("Er is een fout opgetreden bij het exporteren naar PDF.")
+      alert(`Fout bij exporteren naar PDF: ${error}`)
     }
   }
 
