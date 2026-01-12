@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label"
 
 import type React from "react"
 import { useToast } from "@/components/ui/use-toast"
-import { Trash2, X, Plus, FileText, Upload, Pencil, Download, RotateCcw, Flag, FileDown } from "lucide-react" // Added Flag icon, FileDown, Edit icons
+import { Trash2, X, Plus, FileText, Upload, Pencil, Download, RotateCcw, Flag, FileDown, Edit } from "lucide-react" // Added Flag icon, FileDown, Edit icons
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -31,6 +31,8 @@ import {
   renameSeriesInCategory, // Import renameSeriesInCategory
   renameCategoryId, // Added import for renameCategoryId
   deleteSeriesFromCategory, // Added import for deleteSeriesFromCategory
+  getAllFlaggedQuestions, // Added import
+  unflagQuestion, // ADDED: Function to remove flag
 } from "@/lib/firebase-service"
 import type { CategoryStatus } from "@/lib/categories-data"
 // Removed imports of static question sets: questionSets as radarQuestionSets, questionSets as matrozenQuestionSets
@@ -239,6 +241,68 @@ export default function AdminPage() {
   })
   const [isLoadingStats, setIsLoadingStats] = useState(true)
   const [isExporting, setIsExporting] = useState(false) // NEW: State for export button
+
+  // Added state for flagged questions
+  const [flaggedQuestions, setFlaggedQuestions] = useState<any[]>([])
+  const [isLoadingFlags, setIsLoadingFlags] = useState(false)
+  const [selectedFlagCategory, setSelectedFlagCategory] = useState<string>("radar")
+
+  const [activeTab, setActiveTab] = useState<"categories" | "questions" | "stats">("categories")
+
+  const handleOpenFlaggedQuestion = useCallback(
+    (questionId: string, categoryId: string) => {
+      // Extract the numeric ID from the question key (e.g., "matroos-10" -> 10)
+      const numericId = Number.parseInt(questionId.split("-").pop() || "0", 10)
+
+      // Switch to the correct category if needed
+      if (categoryId !== selectedCategory) {
+        setSelectedCategory(categoryId)
+      }
+
+      // Set the editing question ID
+      setEditingQuestionId(numericId)
+
+      // Switch to "Vragen Beheren" tab (assuming there's a tab system, otherwise this might need adjustment)
+      // For now, we'll just ensure the browser is open and scroll to the question
+      setActiveTab("questions") // Ensure the correct tab is active
+      setShowQuestionBrowser(true)
+
+      // Scroll to the question after a short delay to allow the tab switch/browser to render
+      setTimeout(() => {
+        // Use a data attribute for more robust selection
+        const questionElement = document.querySelector(`[data-question-id="${numericId}"]`)
+        if (questionElement) {
+          questionElement.scrollIntoView({ behavior: "smooth", block: "center" })
+        }
+      }, 300)
+    },
+    [selectedCategory, setActiveTab], // Dependency on selectedCategory and setActiveTab
+  )
+
+  const handleRemoveFlag = useCallback(
+    async (flag: any) => {
+      try {
+        await unflagQuestion(flag.username, flag.questionId, flag.categoryId)
+
+        // Reload flagged questions for the currently selected category
+        const flags = await getAllFlaggedQuestions(selectedFlagCategory)
+        setFlaggedQuestions(flags)
+
+        toast({
+          title: "Vlag verwijderd",
+          description: `De vlag voor vraag ${flag.questionId} in categorie ${flag.categoryId} is verwijderd.`,
+        })
+      } catch (error) {
+        console.error("[v0] Error removing flag:", error)
+        toast({
+          title: "Fout",
+          description: "Er is een fout opgetreden bij het verwijderen van de vlag.",
+          variant: "destructive",
+        })
+      }
+    },
+    [selectedFlagCategory, toast], // Dependencies
+  )
 
   const handleResetAnonymousClicks = async () => {
     try {
@@ -782,6 +846,24 @@ export default function AdminPage() {
   useEffect(() => {
     loadUserStatistics()
   }, [loadUserStatistics])
+
+  // Add function to load flagged questions
+  const loadFlaggedQuestions = async (category: string) => {
+    setIsLoadingFlags(true)
+    try {
+      const flags = await getAllFlaggedQuestions(category)
+      setFlaggedQuestions(flags)
+    } catch (error) {
+      console.error("[v0] Error loading flagged questions:", error)
+      toast({
+        title: "Fout",
+        description: "Kon gemarkeerde vragen niet laden",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingFlags(false)
+    }
+  }
 
   const isStaticCategory = false // Removed check for static categories
 
@@ -2015,6 +2097,7 @@ export default function AdminPage() {
             className="cursor-pointer hover:border-primary transition-colors"
             onClick={() => {
               setSelectedCategory(category.id)
+              setActiveTab("questions") // Switch to questions tab
               setShowQuestionBrowser(true)
             }}
           >
@@ -2710,6 +2793,113 @@ export default function AdminPage() {
     }
   }
 
+  const exportToPDF = async (reeksValue: string) => {
+    try {
+      const pdf = new jsPDF()
+      const pageWidth = pdf.internal.pageSize.getWidth()
+      const marginLeft = 20
+      const marginRight = 20
+      const contentWidth = pageWidth - marginLeft - marginRight
+
+      let yPosition = 20
+      const lineHeight = 10
+      const maxLineHeight = pdf.internal.pageSize.getHeight() - 20
+
+      pdf.setFont(undefined, "bold")
+      pdf.setFontSize(16)
+      pdf.text(`Vragen - ${selectedCategory} - ${reeksValue}`, marginLeft, yPosition)
+      yPosition += 20
+
+      // Get all questions for the selected series
+      const reeksQuestions = filteredQuestions.filter((q) => {
+        const normalizedQuestionReeks = normalizeReeks(q.reeks).toLowerCase()
+        const normalizedSelectedReeks = normalizeReeks(reeksValue).toLowerCase()
+        return normalizedQuestionReeks === normalizedSelectedReeks
+      })
+
+      if (reeksQuestions.length === 0) {
+        alert("Geen vragen gevonden voor deze reeks")
+        return
+      }
+
+      for (const question of reeksQuestions) {
+        if (yPosition > maxLineHeight - 60) {
+          pdf.addPage()
+          yPosition = 20
+        }
+
+        // Question number and text
+        pdf.setFont(undefined, "bold")
+        pdf.setFontSize(12)
+        pdf.text(`Vraag ${question.id}:`, marginLeft, yPosition)
+        yPosition += lineHeight
+
+        // Add question image if present
+        if (question.questionImage) {
+          try {
+            const imgWidth = 80
+            const imgHeight = 60
+            pdf.addImage(question.questionImage, "PNG", marginLeft, yPosition, imgWidth, imgHeight)
+            yPosition += imgHeight + 5
+          } catch (error) {
+            console.error("Error adding question image:", error)
+          }
+        }
+
+        pdf.setFont(undefined, "normal")
+        pdf.setFontSize(11)
+        const questionLines = pdf.splitTextToSize(question.question || "Geen vraag tekst", contentWidth)
+        pdf.text(questionLines, marginLeft, yPosition)
+        yPosition += questionLines.length * 7 + 10
+
+        // Options
+        pdf.setFont(undefined, "normal")
+        const options = ["a", "b", "c", "d"]
+        for (const opt of options) {
+          if (question.options?.[opt]) {
+            const isCorrect = question.correctAnswer?.toLowerCase() === opt
+            if (isCorrect) {
+              pdf.setTextColor(0, 128, 0) // Green for correct answer
+              pdf.setFont(undefined, "bold")
+            }
+
+            // Add option image if present
+            const optionImage = question[`option${opt.toUpperCase()}Image` as keyof typeof question]
+            if (optionImage && typeof optionImage === "string") {
+              try {
+                const imgWidth = 60
+                const imgHeight = 45
+                pdf.addImage(optionImage, "PNG", marginLeft, yPosition, imgWidth, imgHeight)
+                yPosition += imgHeight + 2
+              } catch (error) {
+                console.error("Error adding option image:", error)
+              }
+            }
+
+            const optionLines = pdf.splitTextToSize(`${opt.toUpperCase()}) ${question.options[opt]}`, contentWidth)
+            pdf.text(optionLines, marginLeft, yPosition)
+            yPosition += optionLines.length * 6 + 5
+
+            // Reset text color and font
+            pdf.setTextColor(0, 0, 0)
+            pdf.setFont(undefined, "normal")
+          }
+        }
+
+        yPosition += 10 // Space between questions
+      }
+
+      // Save PDF
+      const fileName = `${selectedCategory}-${selectedQuestionSet}-${new Date().toISOString().split("T")[0]}.pdf`
+      pdf.save(fileName)
+
+      alert(`PDF succesvol geëxporteerd: ${reeksQuestions.length} vragen`)
+    } catch (error) {
+      console.error("Error exporting to PDF:", error)
+      alert(`Fout bij exporteren naar PDF: ${error}`)
+    }
+  }
+
   const handleExportReeksToPDF = async () => {
     if (!selectedCategory || selectedQuestionSet === "all") {
       alert("Selecteer eerst een specifieke reeks om te exporteren naar PDF.")
@@ -2855,143 +3045,193 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* User Statistics */}
-        <div className="mb-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card className="py-2">
-              <CardHeader className="pb-0 pt-2 px-4">
-                <CardTitle className="text-xl font-bold">{userStats.totalUsers}</CardTitle>
-                <CardDescription className="text-[10px]">Totaal Gebruikers</CardDescription>
-              </CardHeader>
-            </Card>
-            <Card className="py-2">
-              <CardHeader className="pb-0 pt-2 px-4">
-                <CardTitle className="text-xl font-bold">{userStats.anonymousClicks || 0}</CardTitle>
-                <CardDescription className="text-[10px]">Anoniem Gebruik</CardDescription>
-              </CardHeader>
-              <CardFooter className="pt-2 pb-0 px-4">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleResetAnonymousClicks}
-                  className="w-full bg-transparent h-6 text-[10px] py-0"
-                >
-                  <RotateCcw className="w-2.5 h-2.5 mr-1" />
-                  Reset
-                </Button>
-              </CardFooter>
-            </Card>
-          </div>
+        {/* Tabs */}
+        <div className="mb-8 flex space-x-4 border-b">
+          <button
+            className={`py-3 px-4 text-sm font-medium ${
+              activeTab === "categories"
+                ? "text-primary border-b-2 border-primary"
+                : "text-muted-foreground hover:text-primary"
+            }`}
+            onClick={() => setActiveTab("categories")}
+          >
+            Categorie Beheer
+          </button>
+          <button
+            className={`py-3 px-4 text-sm font-medium ${
+              activeTab === "questions"
+                ? "text-primary border-b-2 border-primary"
+                : "text-muted-foreground hover:text-primary"
+            }`}
+            onClick={() => setActiveTab("questions")}
+          >
+            Vragen Beheren
+          </button>
+          <button
+            className={`py-3 px-4 text-sm font-medium ${
+              activeTab === "stats"
+                ? "text-primary border-b-2 border-primary"
+                : "text-muted-foreground hover:text-primary"
+            }`}
+            onClick={() => setActiveTab("stats")}
+          >
+            Statistieken
+          </button>
         </div>
 
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle>Categorie Beheer</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-6">
-              <div>
-                <h3 className="text-lg font-semibold mb-4">Beschikbare Categorieën:</h3>
-                {renderCategoryList()}
-              </div>
+        {activeTab === "categories" && (
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle>Categorie Beheer</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-semibold mb-4">Beschikbare Categorieën:</h3>
+                  {renderCategoryList()}
+                </div>
 
-              <div className="pt-4 border-t">
-                {/* Button text simplified to only "Nieuwe Categorie" */}
-                <Button onClick={handleTextUpload} className="w-full gap-2">
-                  <Plus className="h-4 w-4" />
-                  Nieuwe Categorie
-                </Button>
+                <div className="pt-4 border-t">
+                  {/* Button text simplified to only "Nieuwe Categorie" */}
+                  <Button onClick={handleTextUpload} className="w-full gap-2">
+                    <Plus className="h-4 w-4" />
+                    Nieuwe Categorie
+                  </Button>
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Database Beheer</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {/* CHANGE: Removed maintenance buttons and their associated state/handlers */}
-            <Button onClick={handleExportAllCategories} disabled={isExporting} className="w-full gap-2">
-              <Download className="h-4 w-4" />
-              Exporteer Volledige Backup (Alle Categorieën)
-            </Button>
-            {/* CHANGE: Added button to apply all saved edits */}
-            {/* <Button variant="outline" onClick={handleApplyAllEdits} className="w-full gap-2 bg-transparent">
+        {activeTab === "questions" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Database Beheer</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {/* CHANGE: Removed maintenance buttons and their associated state/handlers */}
+              <Button onClick={handleExportAllCategories} disabled={isExporting} className="w-full gap-2">
+                <Download className="h-4 w-4" />
+                Exporteer Volledige Backup (Alle Categorieën)
+              </Button>
+              {/* CHANGE: Added button to apply all saved edits */}
+              {/* <Button variant="outline" onClick={handleApplyAllEdits} className="w-full gap-2 bg-transparent">
               <Upload className="h-4 w-4" />
               Pas Alle Opgeslagen Aanpassingen Toe
             </Button> */}
-            {/* REMOVED: handleApplyAllEdits button as savedEdits is no longer used */}
-          </CardContent>
-        </Card>
+              {/* REMOVED: handleApplyAllEdits button as savedEdits is no longer used */}
+            </CardContent>
+          </Card>
+        )}
 
-        {showTimestampMigration && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <Card className="w-full max-w-2xl">
-              <CardHeader>
-                <CardTitle>Timestamp Migratie</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {!migrationResult ? (
-                  <>
-                    <p className="text-sm text-muted-foreground">
-                      Deze functie converteert alle oude timestamps (milliseconden) om naar leesbare ISO strings.
-                    </p>
-                    <p className="text-sm text-muted-foreground">Dit wordt toegepast op:</p>
-                    <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
-                      <li>User createdAt en lastActive</li>
-                      <li>Quiz results timestamps</li>
-                      <li>Quiz progress timestamps</li>
-                    </ul>
-                    <div className="flex gap-2">
-                      <Button onClick={handleMigrateTimestamps} disabled={isMigrating}>
-                        {isMigrating ? "Bezig met converteren..." : "Start Migratie"}
-                      </Button>
-                      <Button variant="outline" onClick={() => setShowTimestampMigration(false)}>
-                        Annuleren
-                      </Button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className={`p-4 rounded-lg ${migrationResult.success ? "bg-green-500/10" : "bg-red-500/10"}`}>
-                      <p className={`font-semibold ${migrationResult.success ? "text-green-600" : "text-red-600"}`}>
-                        {migrationResult.message}
-                      </p>
-                    </div>
-                    {migrationResult.success && (
-                      <div className="space-y-2">
-                        <h3 className="font-semibold text-sm">Details per gebruiker:</h3>
-                        <div className="bg-muted p-3 rounded-lg text-xs font-mono max-h-64 overflow-y-auto">
-                          {Object.entries(migrationResult.details).map(([username, details]: [string, any]) => (
-                            <div key={username} className="mb-2">
-                              <strong>{username}:</strong>
-                              <ul className="ml-4">
-                                {details.createdAt && <li>✓ createdAt omgezet</li>}
-                                {details.lastActive && <li>✓ lastActive omgezet</li>}
-                                {details.quizResults > 0 && <li>✓ {details.quizResults} quiz results omgezet</li>}
-                                {details.quizProgress > 0 && <li>✓ {details.quizProgress} quiz progress omgezet</li>}
-                              </ul>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    <Button
-                      onClick={() => {
-                        setShowTimestampMigration(false)
-                        setMigrationResult(null)
-                      }}
-                      className="w-full"
-                    >
-                      Sluiten
-                    </Button>
-                  </>
-                )}
-              </CardContent>
-            </Card>
+        {activeTab === "stats" && (
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold mb-4">Gebruikersstatistieken</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card className="py-2">
+                <CardHeader className="pb-0 pt-2 px-4">
+                  <CardTitle className="text-xl font-bold">{userStats.totalUsers}</CardTitle>
+                  <CardDescription className="text-[10px]">Totaal Gebruikers</CardDescription>
+                </CardHeader>
+              </Card>
+              <Card className="py-2">
+                <CardHeader className="pb-0 pt-2 px-4">
+                  <CardTitle className="text-xl font-bold">{userStats.totalQuizResults}</CardTitle>
+                  <CardDescription className="text-[10px]">Totaal Quiz Resultaten</CardDescription>
+                </CardHeader>
+              </Card>
+              <Card className="py-2">
+                <CardHeader className="pb-0 pt-2 px-4">
+                  <CardTitle className="text-xl font-bold">{userStats.recentActiveUsers}</CardTitle>
+                  <CardDescription className="text-[10px]">Actief in laatste 24u</CardDescription>
+                </CardHeader>
+              </Card>
+              <Card className="py-2">
+                <CardHeader className="pb-0 pt-2 px-4">
+                  <CardTitle className="text-xl font-bold">{userStats.anonymousClicks || 0}</CardTitle>
+                  <CardDescription className="text-[10px]">Anoniem Gebruik</CardDescription>
+                </CardHeader>
+                <CardFooter className="pt-2 pb-0 px-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleResetAnonymousClicks}
+                    className="w-full bg-transparent h-6 text-[10px] py-0"
+                  >
+                    <RotateCcw className="w-2.5 h-2.5 mr-1" />
+                    Reset
+                  </Button>
+                </CardFooter>
+              </Card>
+            </div>
           </div>
         )}
+
+        <Dialog open={showTimestampMigration} onOpenChange={setShowTimestampMigration}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Timestamp Migratie</DialogTitle>
+            </DialogHeader>
+            <CardContent className="space-y-4">
+              {!migrationResult ? (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Deze functie converteert alle oude timestamps (milliseconden) om naar leesbare ISO strings.
+                  </p>
+                  <p className="text-sm text-muted-foreground">Dit wordt toegepast op:</p>
+                  <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
+                    <li>User createdAt en lastActive</li>
+                    <li>Quiz results timestamps</li>
+                    <li>Quiz progress timestamps</li>
+                  </ul>
+                  <div className="flex gap-2">
+                    <Button onClick={handleMigrateTimestamps} disabled={isMigrating}>
+                      {isMigrating ? "Bezig met converteren..." : "Start Migratie"}
+                    </Button>
+                    <Button variant="outline" onClick={() => setShowTimestampMigration(false)}>
+                      Annuleren
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className={`p-4 rounded-lg ${migrationResult.success ? "bg-green-500/10" : "bg-red-500/10"}`}>
+                    <p className={`font-semibold ${migrationResult.success ? "text-green-600" : "text-red-600"}`}>
+                      {migrationResult.message}
+                    </p>
+                  </div>
+                  {migrationResult.success && (
+                    <div className="space-y-2">
+                      <h3 className="font-semibold text-sm">Details per gebruiker:</h3>
+                      <div className="bg-muted p-3 rounded-lg text-xs font-mono max-h-64 overflow-y-auto">
+                        {Object.entries(migrationResult.details).map(([username, details]: [string, any]) => (
+                          <div key={username} className="mb-2">
+                            <strong>{username}:</strong>
+                            <ul className="ml-4">
+                              {details.createdAt && <li>✓ createdAt omgezet</li>}
+                              {details.lastActive && <li>✓ lastActive omgezet</li>}
+                              {details.quizResults > 0 && <li>✓ {details.quizResults} quiz results omgezet</li>}
+                              {details.quizProgress > 0 && <li>✓ {details.quizProgress} quiz progress omgezet</li>}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <Button
+                    onClick={() => {
+                      setShowTimestampMigration(false)
+                      setMigrationResult(null)
+                    }}
+                    className="w-full"
+                  >
+                    Sluiten
+                  </Button>
+                </>
+              )}
+            </CardContent>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={showUploadModal} onOpenChange={setShowUploadModal}>
           <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
@@ -3608,6 +3848,7 @@ export default function AdminPage() {
                         question.needsReview && "border-amber-500 border-2", // Visual indicator for flagged questions
                         hasMissingImages ? "border-red-400 bg-red-50" : "",
                       )}
+                      data-question-id={question.id} // ADDED: data attribute for scrolling
                     >
                       <CardHeader className="pb-4">
                         <div className="flex items-center justify-between gap-4">
@@ -4369,55 +4610,51 @@ export default function AdminPage() {
           </DialogContent>
         </Dialog>
 
-        {showReeksUpdate && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <Card className="w-full max-w-2xl">
-              <CardHeader>
-                <CardTitle>Update Reeksen</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {!reeksUpdateResult ? (
-                  <>
-                    <p className="text-sm text-muted-foreground">
-                      Deze functie update de 'reeks' velden van bestaande vragen. Dit kan handig zijn als je vragen hebt
-                      toegevoegd zonder een specifieke reeks, of als je de reeksnamen wilt normaliseren. De functie zal
-                      proberen de 'reeks' velden te herkennen en te standaardiseren.
-                    </p>
-                    <div className="flex gap-2">
-                      <Button onClick={handleUpdateReeks} disabled={isReeksUpdating}>
-                        {isReeksUpdating ? "Bezig met updaten..." : "Start Update"}
-                      </Button>
-                      <Button variant="outline" onClick={() => setShowReeksUpdate(false)}>
-                        Annuleren
-                      </Button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div
-                      className={`p-4 rounded-lg ${reeksUpdateResult.success ? "bg-green-500/10" : "bg-red-500/10"}`}
-                    >
-                      <p className={`font-semibold ${reeksUpdateResult.success ? "text-green-600" : "text-red-600"}`}>
-                        {reeksUpdateResult.success
-                          ? `Update voltooid: ${reeksUpdateResult.questionsUpdated} vragen bijgewerkt.`
-                          : `Update mislukt: ${reeksUpdateResult.errors.join(", ")}`}
-                      </p>
-                    </div>
-                    <Button
-                      onClick={() => {
-                        setShowReeksUpdate(false)
-                        setReeksUpdateResult(null)
-                      }}
-                      className="w-full"
-                    >
-                      Sluiten
+        <Dialog open={showReeksUpdate} onOpenChange={setShowReeksUpdate}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Update Reeksen</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              {!reeksUpdateResult ? (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Deze functie update de 'reeks' velden van bestaande vragen. Dit kan handig zijn als je vragen hebt
+                    toegevoegd zonder een specifieke reeks, of als je de reeksnamen wilt normaliseren. De functie zal
+                    proberen de 'reeks' velden te herkennen en te standaardiseren.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button onClick={handleUpdateReeks} disabled={isReeksUpdating}>
+                      {isReeksUpdating ? "Bezig met updaten..." : "Start Update"}
                     </Button>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        )}
+                    <Button variant="outline" onClick={() => setShowReeksUpdate(false)}>
+                      Annuleren
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className={`p-4 rounded-lg ${reeksUpdateResult.success ? "bg-green-500/10" : "bg-red-500/10"}`}>
+                    <p className={`font-semibold ${reeksUpdateResult.success ? "text-green-600" : "text-red-600"}`}>
+                      {reeksUpdateResult.success
+                        ? `Update voltooid: ${reeksUpdateResult.questionsUpdated} vragen bijgewerkt.`
+                        : `Update mislukt: ${reeksUpdateResult.errors.join(", ")}`}
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => {
+                      setShowReeksUpdate(false)
+                      setReeksUpdateResult(null)
+                    }}
+                    className="w-full"
+                  >
+                    Sluiten
+                  </Button>
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={showStaticMigration} onOpenChange={setShowStaticMigration}>
           <DialogContent className="max-w-2xl">
@@ -4554,6 +4791,96 @@ export default function AdminPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Flag className="h-5 w-5" />
+              Gemarkeerde Vragen
+            </CardTitle>
+            <CardDescription>Bekijk vragen die door testers zijn gemarkeerd voor review</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex gap-4">
+              <Select value={selectedFlagCategory} onValueChange={setSelectedFlagCategory}>
+                <SelectTrigger className="w-[300px]">
+                  <SelectValue placeholder="Selecteer categorie" />
+                </SelectTrigger>
+                <SelectContent>
+                  {allCategories.map((cat) => (
+                    <SelectItem key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Button onClick={() => loadFlaggedQuestions(selectedFlagCategory)}>Laad gemarkeerde vragen</Button>
+            </div>
+
+            {isLoadingFlags && <div className="text-center text-muted-foreground">Laden...</div>}
+
+            {!isLoadingFlags && flaggedQuestions.length === 0 && (
+              <div className="text-center text-muted-foreground">Geen gemarkeerde vragen voor deze categorie</div>
+            )}
+
+            {!isLoadingFlags && flaggedQuestions.length > 0 && (
+              <div className="space-y-4">
+                <div className="text-sm text-muted-foreground">
+                  {flaggedQuestions.length} vraag{flaggedQuestions.length !== 1 ? "en" : ""} gemarkeerd
+                </div>
+
+                {flaggedQuestions.map((flag, index) => (
+                  <Card key={index} className="border-orange-200 bg-orange-50">
+                    <CardHeader>
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Flag className="h-4 w-4 text-orange-500" />
+                        Vraag {flag.questionId}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <div>
+                        <div className="font-medium">Vraag ID:</div>
+                        <div className="text-sm">{flag.questionId}</div>
+                      </div>
+                      <div>
+                        <div className="font-medium">Gemarkeerd door:</div>
+                        <div className="text-sm">{flag.username}</div>
+                      </div>
+                      <div>
+                        <div className="font-medium">Datum:</div>
+                        <div className="text-sm">{new Date(flag.timestamp).toLocaleString("nl-BE")}</div>
+                      </div>
+                      {flag.questionText && (
+                        <div>
+                          <div className="font-medium">Vraag:</div>
+                          <div className="text-sm">{flag.questionText}</div>
+                        </div>
+                      )}
+                      {flag.reason && (
+                        <div>
+                          <div className="font-medium">Reden:</div>
+                          <div className="text-sm">{flag.reason}</div>
+                        </div>
+                      )}
+                      {/* Adding action buttons to open question in editor and remove flag */}
+                      <div className="flex gap-2 mt-4">
+                        <Button size="sm" onClick={() => handleOpenFlaggedQuestion(flag.questionId, flag.categoryId)}>
+                          <Edit className="h-4 w-4 mr-2" />
+                          Open in Editor
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleRemoveFlag(flag)}>
+                          <X className="h-4 w-4 mr-2" />
+                          Verwijder Vlag
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   )

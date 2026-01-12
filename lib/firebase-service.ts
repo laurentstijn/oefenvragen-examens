@@ -76,6 +76,15 @@ export interface CategoryStatus {
   updatedAt: string
 }
 
+export interface QuestionFlag {
+  questionId: string
+  categoryId: string
+  username: string
+  reason?: string
+  timestamp: string
+  questionText: string
+}
+
 async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder()
   const data = encoder.encode(password)
@@ -1214,5 +1223,116 @@ export async function renameCategoryId(
   } catch (error) {
     console.error("[v0] Error renaming category ID:", error)
     return { success: false, movedQuestionsCount: 0 }
+  }
+}
+
+export async function flagQuestion(
+  username: string,
+  questionId: string,
+  categoryId: string,
+  questionText?: string,
+  reason?: string,
+): Promise<void> {
+  try {
+    const flagRef = ref(db, `questionFlags/${categoryId}/${questionId}/${encodeUserKey(username)}`)
+    await set(flagRef, {
+      questionId,
+      categoryId,
+      username,
+      questionText: questionText ? questionText.substring(0, 200) : "", // Added null check before substring
+      reason: reason || "",
+      timestamp: new Date().toISOString(),
+    })
+    console.log("[v0] Question flagged:", questionId, "by", username)
+  } catch (error) {
+    console.error("[v0] Error flagging question:", error)
+    throw error
+  }
+}
+
+export async function unflagQuestion(username: string, questionId: string, categoryId: string): Promise<void> {
+  try {
+    const flagRef = ref(db, `questionFlags/${categoryId}/${questionId}/${encodeUserKey(username)}`)
+    await remove(flagRef)
+    console.log("[v0] Question unflagged:", questionId, "by", username)
+  } catch (error) {
+    console.error("[v0] Error unflagging question:", error)
+  }
+}
+
+export async function isQuestionFlagged(questionId: string, categoryId: string, username: string): Promise<boolean> {
+  try {
+    const flagRef = ref(db, `questionFlags/${categoryId}/${questionId}/${encodeUserKey(username)}`)
+    const snapshot = await get(flagRef)
+    return snapshot.exists()
+  } catch (error) {
+    console.error("[v0] Error checking if question is flagged:", error)
+    return false
+  }
+}
+
+export async function getAllFlaggedQuestions(categoryId?: string): Promise<QuestionFlag[]> {
+  try {
+    console.log("[v0] Getting flagged questions for category:", categoryId || "all")
+    const flagsRef = categoryId ? ref(db, `questionFlags/${categoryId}`) : ref(db, "questionFlags")
+    const snapshot = await get(flagsRef)
+
+    if (!snapshot.exists()) {
+      console.log("[v0] No flagged questions found")
+      return []
+    }
+
+    const flags: QuestionFlag[] = []
+
+    if (categoryId) {
+      // If category is specified: questionFlags/categoryId/questionId/username
+      snapshot.forEach((questionSnapshot) => {
+        questionSnapshot.forEach((userSnapshot) => {
+          const flagData = userSnapshot.val() as QuestionFlag
+          flags.push(flagData)
+        })
+      })
+    } else {
+      // If no category: questionFlags/categoryId/questionId/username
+      snapshot.forEach((categorySnapshot) => {
+        categorySnapshot.forEach((questionSnapshot) => {
+          questionSnapshot.forEach((userSnapshot) => {
+            const flagData = userSnapshot.val() as QuestionFlag
+            flags.push(flagData)
+          })
+        })
+      })
+    }
+
+    console.log("[v0] Found", flags.length, "flagged questions")
+    return flags.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+  } catch (error) {
+    console.error("[v0] Error getting flagged questions:", error)
+    return []
+  }
+}
+
+export async function getUserFlaggedQuestions(username: string, categoryId: string): Promise<string[]> {
+  try {
+    const flagsRef = ref(db, `questionFlags/${categoryId}`)
+    const snapshot = await get(flagsRef)
+
+    if (!snapshot.exists()) {
+      return []
+    }
+
+    const flaggedIds: string[] = []
+    const encodedUsername = encodeUserKey(username)
+
+    snapshot.forEach((questionSnapshot) => {
+      if (questionSnapshot.hasChild(encodedUsername)) {
+        flaggedIds.push(questionSnapshot.key as string)
+      }
+    })
+
+    return flaggedIds
+  } catch (error) {
+    console.error("[v0] Error getting user flagged questions:", error)
+    return []
   }
 }

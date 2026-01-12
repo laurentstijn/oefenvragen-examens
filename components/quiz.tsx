@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import { CheckCircle2, XCircle, RotateCcw, Shuffle, ChevronLeft, AlertCircle } from "lucide-react"
+import { CheckCircle2, XCircle, RotateCcw, Shuffle, ChevronLeft, AlertCircle, Flag } from "lucide-react"
 import type { Question, QuestionSet } from "@/lib/radar-data"
 import {
   saveQuizResult,
@@ -20,15 +20,20 @@ import {
   getIncorrectQuestions,
   type QuizProgress,
   getQuizProgress,
+  flagQuestion,
+  unflagQuestion,
+  getUserFlaggedQuestions,
 } from "@/lib/firebase-service"
 import { useAuth } from "@/contexts/auth-context"
 import { db } from "@/lib/firebase-config"
 import { ref, get } from "firebase/database"
+import { useToast } from "@/components/ui/use-toast"
 
 interface QuizProps {
   onQuizComplete?: () => void
   onQuizStateChange?: (isActive: boolean) => void
   category?: string // Added category prop
+  isTestMode?: boolean // Added isTestMode prop for testers
 }
 
 function shuffleArray<T>(array: T[]): T[] {
@@ -126,8 +131,9 @@ function getQuestionsByIds(questionIds: string[], questionSets: QuestionSet[]): 
   return questionSets.flatMap((set) => set.questions.filter((q) => questionIds.includes(q.id)))
 }
 
-export default function Quiz({ onQuizComplete, onQuizStateChange, category = "radar" }: QuizProps) {
+export default function Quiz({ onQuizComplete, onQuizStateChange, category = "radar", isTestMode = false }: QuizProps) {
   const { username, isAnonymous } = useAuth()
+  const { toast } = useToast()
 
   const [selectedSet, setSelectedSet] = useState<QuestionSet | null>(null)
   const [isWrongAnswersMode, setIsWrongAnswersMode] = useState(false)
@@ -148,6 +154,8 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
   const [savedProgress, setSavedProgress] = useState<QuizProgress | null>(null)
   const [questionSets, setQuestionSets] = useState<QuestionSet[]>([])
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(true)
+  const [flaggedQuestions, setFlaggedQuestions] = useState<string[]>([])
+  const [questionFlags, setQuestionFlags] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     const loadQuestions = async () => {
@@ -265,6 +273,27 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
 
     loadQuestions()
   }, [category])
+
+  useEffect(() => {
+    const loadFlaggedQuestions = async () => {
+      if (!username || isAnonymous) {
+        setFlaggedQuestions([])
+        return
+      }
+
+      try {
+        const flagged = await getUserFlaggedQuestions(username, category)
+        setFlaggedQuestions(flagged)
+        const flags: Record<string, boolean> = {}
+        flagged.forEach((id) => (flags[id] = true))
+        setQuestionFlags(flags)
+      } catch (error) {
+        console.error("[v0] Error loading flagged questions:", error)
+      }
+    }
+
+    loadFlaggedQuestions()
+  }, [username, isAnonymous, category])
 
   useEffect(() => {
     if (onQuizStateChange) {
@@ -525,6 +554,50 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
       if (username && selectedSet && !isAnonymous) {
         saveQuizResultToFirebase(newAnswers)
       }
+    }
+  }
+
+  // Adding handlePrevious function for testers to go back
+  const handlePrevious = () => {
+    if (currentQuestion > 0) {
+      setCurrentQuestion(currentQuestion - 1)
+      setSelectedAnswer(answers[currentQuestion - 1])
+    }
+  }
+
+  // Adding toggle flag function
+  const handleToggleFlag = async () => {
+    if (!username || isAnonymous || !questions[currentQuestion]) return
+
+    const questionId = questions[currentQuestion].id
+    const questionText = questions[currentQuestion].question
+    const isFlagged = questionFlags[questionId]
+
+    try {
+      if (isFlagged) {
+        await unflagQuestion(username, questionId, category)
+        setQuestionFlags((prev) => ({ ...prev, [questionId]: false }))
+        setFlaggedQuestions((prev) => prev.filter((id) => id !== questionId))
+        toast({
+          title: "Markering verwijderd",
+          description: "De vraag is niet meer gemarkeerd",
+        })
+      } else {
+        await flagQuestion(username, questionId, category, questionText)
+        setQuestionFlags((prev) => ({ ...prev, [questionId]: true }))
+        setFlaggedQuestions((prev) => [...prev, questionId])
+        toast({
+          title: "Vraag gemarkeerd",
+          description: "De vraag is gemarkeerd voor review",
+        })
+      }
+    } catch (error) {
+      console.error("[v0] Error toggling flag:", error)
+      toast({
+        title: "Fout",
+        description: "Er is een fout opgetreden bij het markeren van de vraag",
+        variant: "destructive",
+      })
     }
   }
 
@@ -1012,9 +1085,30 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
           <span className="text-xs sm:text-sm font-medium text-muted-foreground">
             Vraag {currentQuestion + 1} van {questions.length}
           </span>
+          {isTestMode && !isAnonymous && username && (
+            <Button
+              onClick={handleToggleFlag}
+              variant="ghost"
+              size="sm"
+              className={cn("gap-2", questionFlags[questions[currentQuestion]?.id] && "text-orange-500")}
+            >
+              <Flag className="w-4 h-4" />
+              <span className="hidden sm:inline text-xs">
+                {questionFlags[questions[currentQuestion]?.id] ? "Gemarkeerd" : "Markeer vraag"}
+              </span>
+            </Button>
+          )}
         </div>
         <Progress value={((currentQuestion + 1) / questions.length) * 100} className="w-full" />
         <h3 className="text-base sm:text-lg lg:text-xl leading-relaxed mt-4">{questions[currentQuestion].question}</h3>
+        {isTestMode && questionFlags[questions[currentQuestion]?.id] && (
+          <div className="mt-2 p-2 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 rounded-lg flex items-center gap-2">
+            <Flag className="w-4 h-4 text-orange-500" />
+            <p className="text-xs sm:text-sm text-orange-900 dark:text-orange-100">
+              Je hebt deze vraag gemarkeerd voor review
+            </p>
+          </div>
+        )}
         {questions[currentQuestion].image && (
           <div className="mt-3 sm:mt-4 p-3 sm:p-4 bg-muted rounded-lg border">
             <img
@@ -1089,6 +1183,12 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
         })}
       </CardContent>
       <CardFooter className="flex flex-col gap-2 pt-4">
+        {isTestMode && currentQuestion > 0 && (
+          <Button onClick={handlePrevious} variant="outline" className="w-full bg-transparent">
+            <ChevronLeft className="w-4 h-4 mr-2" />
+            Vorige Vraag
+          </Button>
+        )}
         <Button onClick={handleNext} disabled={!selectedAnswer} className="w-full">
           {currentQuestion < questions.length - 1 ? "Volgende Vraag" : "Bekijk Resultaten"}
         </Button>

@@ -12,6 +12,19 @@
         }
       }
     },
+    "verificationCodes": {
+      ".read": "true",
+      ".write": "true"
+    },
+    "questionFlags": {
+      ".read": "true",
+      ".write": "true",
+      "$categoryId": {
+        "$questionId": {
+          ".indexOn": ["timestamp", "username"]
+        }
+      }
+    },
     "analytics": {
       ".read": "true",
       ".write": "true"
