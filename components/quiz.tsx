@@ -245,12 +245,21 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
           )
 
           // Create question sets from reeks groups
-          const dynamicSets: QuestionSet[] = Object.entries(questionsByReeks).map(([normalizedReeks, questions]) => ({
-            id: `${category}-reeks-${normalizedReeks}`,
-            name: `Reeks ${originalReeksNames[normalizedReeks]}`,
-            description: `${questions.length} vragen`,
-            questions,
-          }))
+          const dynamicSets: QuestionSet[] = Object.entries(questionsByReeks).map(([normalizedReeks, questions]) => {
+            // Sort questions by ID to maintain consistent order
+            const sortedQuestions = [...questions].sort((a, b) => {
+              // Extract numeric part from IDs like "vhf-1", "vhf-2"
+              const aNum = parseInt(a.id.split('-').pop() || "0")
+              const bNum = parseInt(b.id.split('-').pop() || "0")
+              return aNum - bNum
+            })
+            return {
+              id: `${category}-reeks-${normalizedReeks}`,
+              name: `Reeks ${originalReeksNames[normalizedReeks]}`,
+              description: `${sortedQuestions.length} vragen`,
+              questions: sortedQuestions,
+            }
+          })
 
           console.log("[v0] Loaded question sets:", {
             category,
@@ -475,13 +484,11 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
 
   const handleStartQuiz = () => {
     if (!selectedSet) return
-    console.log("[v0] Starting quiz with shuffle settings:", { isShuffleQuestions, isShuffleAnswers })
     const convertedQuestions = convertQuestions(selectedSet.questions)
     const shuffledQuestions = isShuffleQuestions ? shuffleArray(convertedQuestions) : convertedQuestions
     const processedQuestions = isShuffleAnswers
       ? shuffledQuestions.map((q) => ({ ...q, options: shuffleArray([...q.options]) }))
       : shuffledQuestions
-    console.log("[v0] First question after processing:", {id: processedQuestions[0]?.id, question: processedQuestions[0]?.question?.substring(0, 50)})
     setQuestions(processedQuestions)
     setQuizStarted(true)
     onQuizStateChange?.(true)
