@@ -532,17 +532,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
     setAnswers(newAnswers)
 
     const currentQ = questions[currentQuestion]
-    console.log("[v0] Answer comparison:", {
-      questionId: currentQ.id,
-      selectedAnswer: selectedAnswer,
-      selectedAnswerType: typeof selectedAnswer,
-      correctAnswer: currentQ.correctAnswer,
-      correctAnswerType: typeof currentQ.correctAnswer,
-      areEqual: selectedAnswer === currentQ.correctAnswer,
-      selectedAnswerUpperCase: selectedAnswer.toUpperCase(),
-      correctAnswerUpperCase: currentQ.correctAnswer?.toUpperCase?.(),
-      caseInsensitiveEqual: selectedAnswer.toUpperCase() === currentQ.correctAnswer?.toUpperCase(),
-    })
     const isCorrect = selectedAnswer.toUpperCase() === currentQ.correctAnswer?.toUpperCase()
 
     console.log("[v0] Question answered:", {
@@ -554,7 +543,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
 
     try {
       if (isCorrect) {
-        console.log("[v0] Removing correct answer from incorrect questions:", currentQ.id)
         await removeIncorrectQuestion(username, currentQ.id, category)
         await loadWrongAnswers()
       } else if (!isWrongAnswersMode) {
