@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import "./globals.css"
 import { AuthProvider } from "@/contexts/auth-context"
+import { FirebaseProvider } from "@/contexts/firebase-context"
 import { BodyWrapper } from "@/components/body-wrapper"
 
 const _geist = Geist({ subsets: ["latin"] })
@@ -48,9 +49,11 @@ export default function RootLayout({
         />
         <div className="fixed inset-0 bg-background/40 -z-10" />
 
-        <AuthProvider>
-          <BodyWrapper>{children}</BodyWrapper>
-        </AuthProvider>
+        <FirebaseProvider>
+          <AuthProvider>
+            <BodyWrapper>{children}</BodyWrapper>
+          </AuthProvider>
+        </FirebaseProvider>
       </body>
     </html>
   )
