@@ -767,7 +767,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
                       )}
                       {progressInfo && progressInfo.answers && (
                         <p className="text-sm sm:text-base font-medium text-orange-500">
-                          {progressInfo.answers.length}/{set.questions.length} beantwoord
+                          {progressInfo.answers.filter((a) => a !== null).length}/{set.questions.length} beantwoord
                         </p>
                       )}
                     </div>
