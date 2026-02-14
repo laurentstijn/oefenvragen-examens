@@ -52,46 +52,7 @@ export async function extractTextFromPDF(file: File): Promise<string> {
     const arrayBuffer = await file.arrayBuffer()
     const result = await extractText(new Uint8Array(arrayBuffer))
 
-    console.log("[v0] Unpdf result:", typeof result, result)
-
-    let text = ""
-
-    // Handle different possible return formats from unpdf
-    if (typeof result === "string") {
-      text = result
-    } else if (result && typeof result === "object") {
-      // If result has a 'text' property that is an ARRAY (one string per page)
-      if ("text" in result && Array.isArray(result.text)) {
-        text = result.text.join("\n")
-      }
-      // If result has a 'text' property that is a string
-      else if ("text" in result && typeof result.text === "string") {
-        text = result.text
-      }
-      // If result has a 'pages' array with text content
-      else if ("pages" in result && Array.isArray(result.pages)) {
-        text = result.pages
-          .map((page: any) => {
-            if (typeof page === "string") return page
-            if (page && typeof page === "object" && "text" in page) return page.text
-            return ""
-          })
-          .join("\n")
-      }
-      // If result is array-like (pages directly)
-      else if (Array.isArray(result)) {
-        text = result
-          .map((page: any) => {
-            if (typeof page === "string") return page
-            if (page && typeof page === "object" && "text" in page) return page.text
-            return ""
-          })
-          .join("\n")
-      }
-    }
-
     console.log("[v0] Extracted text length:", text?.length || 0)
-    console.log("[v0] First 500 chars:", text?.substring(0, 500))
 
     if (!text || text.length === 0) {
       throw new Error("Geen tekst gevonden in de PDF")

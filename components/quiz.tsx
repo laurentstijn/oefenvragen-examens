@@ -38,7 +38,6 @@ interface QuizProps {
 
 function shuffleArray<T>(array: T[]): T[] {
   if (!array || !Array.isArray(array)) {
-    console.error("[v0] shuffleArray received invalid array:", array)
     return []
   }
   const newArray = [...array]
