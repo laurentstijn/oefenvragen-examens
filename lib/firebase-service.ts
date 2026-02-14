@@ -205,8 +205,6 @@ export async function getUserStats(username: string, category = "radar"): Promis
       id: key
     }))
 
-    console.log("[v0] Found quiz results:", { count: results.length, keys: Object.keys(data) })
-
     results.sort((a, b) => parseTimestamp(b.timestamp).getTime() - parseTimestamp(a.timestamp).getTime())
 
     const totalQuizzes = results.length

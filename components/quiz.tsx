@@ -346,6 +346,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
 
   const saveProgress = async () => {
     if (!username || !selectedSet || isAnonymous) {
+      console.log("[v0] No progress to save")
       return
     }
     try {
@@ -360,7 +361,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
         timestamp: new Date().toISOString(),
       }
 
-      console.log("[v0] Saving progress:", { setId: selectedSet.id, currentQuestion, answersCount: answers?.length })
       await saveQuizProgress(progressData, category)
 
       // Update local seriesProgress state immediately
@@ -384,11 +384,9 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
     }
   }
 
-  const handleStartFresh = async () => {
+  const handleStartFresh = () => {
     if (username && !isAnonymous && savedProgress?.setId) {
-      await clearQuizProgress(username, savedProgress.setId, category)
-      // Reload progress after clearing
-      await loadAllSeriesProgress()
+      clearQuizProgress(username, savedProgress.setId, category)
     }
     // Close the resume dialog and reset state
     setSavedProgress(null)
@@ -492,9 +490,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
       ? shuffledQuestions.map((q) => ({ ...q, options: shuffleArray([...q.options]) }))
       : shuffledQuestions
     setQuestions(processedQuestions)
-    setAnswers(new Array(processedQuestions.length).fill(null))
-    setCurrentQuestion(0)
-    setSelectedAnswer(null)
     setQuizStarted(true)
     onQuizStateChange?.(true)
   }
@@ -654,7 +649,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
     const percentage = Math.round((score / questions.length) * 100)
 
     try {
-      console.log("[v0] Saving quiz result:", { setId: selectedSet.id, score, percentage })
       await saveQuizResult(
         {
           username: username,
@@ -769,7 +763,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
                       )}
                       {progressInfo && progressInfo.answers && (
                         <p className="text-sm sm:text-base font-medium text-orange-500">
-                          {progressInfo.answers.filter((a) => a !== null).length}/{set.questions.length} beantwoord
+                          {progressInfo.answers.length}/{set.questions.length} beantwoord
                         </p>
                       )}
                     </div>
