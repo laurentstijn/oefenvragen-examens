@@ -475,11 +475,13 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
 
   const handleStartQuiz = () => {
     if (!selectedSet) return
+    console.log("[v0] Starting quiz with shuffle settings:", { isShuffleQuestions, isShuffleAnswers })
     const convertedQuestions = convertQuestions(selectedSet.questions)
     const shuffledQuestions = isShuffleQuestions ? shuffleArray(convertedQuestions) : convertedQuestions
     const processedQuestions = isShuffleAnswers
       ? shuffledQuestions.map((q) => ({ ...q, options: shuffleArray([...q.options]) }))
       : shuffledQuestions
+    console.log("[v0] First question after processing:", {id: processedQuestions[0]?.id, question: processedQuestions[0]?.question?.substring(0, 50)})
     setQuestions(processedQuestions)
     setQuizStarted(true)
     onQuizStateChange?.(true)
