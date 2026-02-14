@@ -1,7 +1,5 @@
 // All database operations now use REST API via firebase-rest.ts
 
-import { logger } from "@/lib/logger"
-
 export interface QuizResult {
   username: string
   setId: string

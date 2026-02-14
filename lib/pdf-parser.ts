@@ -20,8 +20,6 @@ export interface ParsedQuestion {
   optionsHaveImages?: boolean // Flag to indicate options contain images instead of text
 }
 
-import { logger } from "@/lib/logger"
-
 export interface ParsedQuestionSet {
   name: string
   questions: ParsedQuestion[]
@@ -96,7 +94,6 @@ export async function extractTextFromPDF(file: File): Promise<string> {
 
     return text
   } catch (error) {
-    logger.error("Error extracting PDF text:", error)
     throw new Error("Kon geen tekst uit de PDF extraheren: " + (error as Error).message)
   }
 }
@@ -107,8 +104,6 @@ export { extractTextFromPDF as extractText }
  * Parse questions from extracted text and return with series name
  */
 export function parseQuestionsWithSeries(text: string): { seriesName: string; questions: ParsedQuestion[] } {
-
-
   const headerMatch = text.match(/^(.+?)(?=\n\d+\.)/s)
   let seriesName = "Reeks 1" // Default fallback
 
@@ -125,16 +120,11 @@ export function parseQuestionsWithSeries(text: string): { seriesName: string; qu
         ) || lines[lines.length - 1]
 
       seriesName = headerLine.trim()
-
     }
   }
 
-  logger.info("Parsing questions from PDF", { textLength: text.length })
   const questions = parseQuestionsFromText(text)
-  logger.info("Parsed questions from PDF", { 
-    totalQuestions: questions.length, 
-    withAnswers: questions.filter((q) => q.correctAnswer).length 
-  })
+
   return { seriesName, questions }
 }
 
