@@ -389,12 +389,27 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
   const handleResumeProgress = () => {
     const progress = seriesProgress[resumeSetId]
     if (progress && selectedSet) {
-      const processedQuestions = shuffleQuestionsIfNeeded(selectedSet.questions)
+      // Set shuffle options FIRST before processing questions
+      setIsShuffleQuestions(progress.shuffleQuestions)
+      setIsShuffleAnswers(progress.shuffleAnswers)
+      
+      // Process questions with the restored shuffle settings
+      let processedQuestions = convertQuestions(selectedSet.questions)
+      
+      if (progress.shuffleQuestions) {
+        processedQuestions = shuffleArray(processedQuestions)
+      }
+      
+      if (progress.shuffleAnswers) {
+        processedQuestions = processedQuestions.map((q) => ({ 
+          ...q, 
+          options: shuffleArray([...q.options]) 
+        }))
+      }
+      
       setQuestions(processedQuestions)
       setCurrentQuestion(progress.currentQuestion)
       setAnswers(progress.answers)
-      setIsShuffleQuestions(progress.shuffleQuestions)
-      setIsShuffleAnswers(progress.shuffleAnswers)
       setQuizStarted(true)
       setShowResumeDialog(false)
     }
@@ -478,9 +493,10 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
     }
 
     if (isShuffleAnswers) {
-      setQuestions(shuffleAnswers(processedQuestions))
-    } else {
-      setQuestions(processedQuestions)
+      processedQuestions = processedQuestions.map((q) => ({ 
+        ...q, 
+        options: shuffleArray([...q.options]) 
+      }))
     }
 
     return processedQuestions
