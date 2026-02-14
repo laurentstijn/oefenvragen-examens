@@ -384,9 +384,11 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
     }
   }
 
-  const handleStartFresh = () => {
+  const handleStartFresh = async () => {
     if (username && !isAnonymous && savedProgress?.setId) {
-      clearQuizProgress(username, savedProgress.setId, category)
+      await clearQuizProgress(username, savedProgress.setId, category)
+      // Reload progress after clearing
+      await loadAllSeriesProgress()
     }
     // Close the resume dialog and reset state
     setSavedProgress(null)
