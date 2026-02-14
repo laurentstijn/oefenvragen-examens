@@ -282,10 +282,7 @@ export function parseQuestionsFromText(text: string): ParsedQuestion[] {
     if (options["F"] && options["F"].length > 0) question.optionF = options["F"]
 
     questions.push(question)
-
   }
-
-
 
   return questions
 }

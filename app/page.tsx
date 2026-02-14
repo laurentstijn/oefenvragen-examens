@@ -47,7 +47,6 @@ export default function Page() {
   }, [email, isAnonymous])
 
   const handleQuizComplete = () => {
-    console.log("[v0] Quiz completed, refreshing stats")
     setStatsRefreshTrigger((prev) => prev + 1)
   }
 
@@ -65,11 +64,9 @@ export default function Page() {
   }
 
   const handleBackToCategories = () => {
-    console.log("[v0] Back to categories clicked")
     setSelectedCategory(null)
     setCurrentCategory(null)
     setQuizKey((prev) => prev + 1)
-    console.log("[v0] Category reset completed")
   }
 
   const getCategoryTitle = () => {
