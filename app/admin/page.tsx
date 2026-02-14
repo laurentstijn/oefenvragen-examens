@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useRouter } from "next/navigation"
-import Link from "next/link" // Import Link for navigation
+import Link from "next/link"
+import { CategoryEditForm } from "@/components/category-edit-form"
 import {
   saveQuestionToFirebase,
   saveCategory,
@@ -2086,8 +2087,8 @@ export default function AdminPage() {
     }
   }
 
-  const handleSaveCategoryName = async (categoryId: string) => {
-    if (!editingCategoryName.trim()) {
+  const handleSaveCategoryEdit = async (categoryId: string, name: string, description: string, iconFile: File | null, iconPreview: string) => {
+    if (!name.trim()) {
       toast({
         title: "Fout",
         description: "Categorienaam mag niet leeg zijn.",
@@ -2099,45 +2100,37 @@ export default function AdminPage() {
     try {
       let iconBase64: string | undefined
 
-      if (editingCategoryIcon) {
+      if (iconFile) {
         const reader = new FileReader()
         iconBase64 = await new Promise<string>((resolve) => {
           reader.onloadend = () => resolve(reader.result as string)
-          reader.readAsDataURL(editingCategoryIcon)
+          reader.readAsDataURL(iconFile)
         })
-      } else if (editingCategoryIconPreview) {
-        // Keep existing icon if no new icon selected
-        iconBase64 = editingCategoryIconPreview
+      } else if (iconPreview) {
+        iconBase64 = iconPreview
       }
 
       const category = allCategories.find((c) => c.id === categoryId)
       if (!category) return
 
-      const newCategoryId = editingCategoryName
+      const newCategoryId = name
         .toLowerCase()
         .replace(/\s+/g, "-")
         .replace(/[^a-z0-9-]/g, "")
 
       if (newCategoryId !== categoryId) {
-        console.log(`[v0] Category ID changed from ${categoryId} to ${newCategoryId}, updating questions...`)
-
-        // Move all questions to new category ID
         const result = await renameCategoryId(categoryId, newCategoryId)
-
-        console.log(`[v0] Moved ${result.movedQuestionsCount} questions to new category ID`)
+        console.log(`Moved ${result.movedQuestionsCount} questions to new category ID`)
       }
 
-      await saveCategory(newCategoryId, editingCategoryName, editingCategoryDescription || category.description, iconBase64)
+      await saveCategory(newCategoryId, name, description || category.description, iconBase64)
 
       toast({
         title: "Categorie bijgewerkt",
-        description: "De categorie naam en icoon zijn succesvol bijgewerkt.",
+        description: "De categorie naam, beschrijving en icoon zijn succesvol bijgewerkt.",
       })
 
       setEditingCategoryId(null)
-      setEditingCategoryName("")
-      setEditingCategoryIcon(null)
-      setEditingCategoryIconPreview("")
 
       if (newCategoryId !== categoryId && selectedCategory === categoryId) {
         setSelectedCategory(newCategoryId)
@@ -2182,70 +2175,15 @@ export default function AdminPage() {
                   )}
                   <div className="flex-1">
                     {editingCategoryId === category.id ? (
-                      <div className="flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-2">
-                          <div className="w-10 h-10 flex-shrink-0 border rounded flex items-center justify-center bg-muted">
-                            {editingCategoryIconPreview || category.icon ? (
-                              <img
-                                src={editingCategoryIconPreview || category.icon}
-                                alt="Preview"
-                                className="w-full h-full object-contain"
-                              />
-                            ) : (
-                              <span className="text-xs text-muted-foreground">Icon</span>
-                            )}
-                          </div>
-                          <label className="cursor-pointer">
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={(e) => handleEditCategoryIconUpload(e.target.files?.[0] || null)}
-                              className="hidden"
-                            />
-                            <Button type="button" variant="outline" size="sm" asChild>
-                              <span>Icoon Kiezen</span>
-                            </Button>
-                          </label>
-                        </div>
-                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                          <Input
-                            value={editingCategoryName}
-                            onChange={(e) => setEditingCategoryName(e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                            onKeyDown={(e) => e.stopPropagation()}
-                            className="max-w-md"
-                            placeholder="Categorie naam"
-                            autoFocus
-                          />
-                        </div>
-                        <div onClick={(e) => e.stopPropagation()}>
-                          <Input
-                            value={editingCategoryDescription}
-                            onChange={(e) => setEditingCategoryDescription(e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                            onKeyDown={(e) => e.stopPropagation()}
-                            className="max-w-md"
-                            placeholder="Beschrijving"
-                          />
-                        </div>
-                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                          <Button onClick={() => handleSaveCategoryName(category.id)} size="sm">
-                            Opslaan
-                          </Button>
-                          <Button
-                            onClick={() => {
-                              setEditingCategoryId(null)
-                              setEditingCategoryIcon(null)
-                              setEditingCategoryIconPreview("")
-                              setEditingCategoryDescription("")
-                            }}
-                            variant="outline"
-                            size="sm"
-                          >
-                            Annuleren
-                          </Button>
-                        </div>
-                      </div>
+                      <CategoryEditForm
+                        initialName={category.name}
+                        initialDescription={category.description || ""}
+                        initialIcon={category.icon || ""}
+                        onSave={(name, description, iconFile, iconPreview) => {
+                          handleSaveCategoryEdit(category.id, name, description, iconFile, iconPreview)
+                        }}
+                        onCancel={() => setEditingCategoryId(null)}
+                      />
                     ) : (
                       <>
                         <CardTitle>{category.name}</CardTitle>
@@ -2261,9 +2199,6 @@ export default function AdminPage() {
                     size="sm"
                     onClick={() => {
                       setEditingCategoryId(category.id)
-                      setEditingCategoryName(category.name)
-                      setEditingCategoryDescription(category.description || "")
-                      setEditingCategoryIconPreview(category.icon || "")
                     }}
                   >
                     <Pencil className="w-4 h-4" />
