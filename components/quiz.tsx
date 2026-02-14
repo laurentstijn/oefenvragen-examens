@@ -490,9 +490,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
       ? shuffledQuestions.map((q) => ({ ...q, options: shuffleArray([...q.options]) }))
       : shuffledQuestions
     setQuestions(processedQuestions)
-    setAnswers(new Array(processedQuestions.length).fill(null))
-    setCurrentQuestion(0)
-    setSelectedAnswer(null)
     setQuizStarted(true)
     onQuizStateChange?.(true)
   }
