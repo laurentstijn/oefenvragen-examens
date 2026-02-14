@@ -245,12 +245,21 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
           )
 
           // Create question sets from reeks groups
-          const dynamicSets: QuestionSet[] = Object.entries(questionsByReeks).map(([normalizedReeks, questions]) => ({
-            id: `${category}-reeks-${normalizedReeks}`,
-            name: `Reeks ${originalReeksNames[normalizedReeks]}`,
-            description: `${questions.length} vragen`,
-            questions,
-          }))
+          const dynamicSets: QuestionSet[] = Object.entries(questionsByReeks).map(([normalizedReeks, questions]) => {
+            // Sort questions by ID to maintain consistent order
+            const sortedQuestions = [...questions].sort((a, b) => {
+              // Extract numeric part from IDs like "vhf-1", "vhf-2"
+              const aNum = parseInt(a.id.split('-').pop() || "0")
+              const bNum = parseInt(b.id.split('-').pop() || "0")
+              return aNum - bNum
+            })
+            return {
+              id: `${category}-reeks-${normalizedReeks}`,
+              name: `Reeks ${originalReeksNames[normalizedReeks]}`,
+              description: `${sortedQuestions.length} vragen`,
+              questions: sortedQuestions,
+            }
+          })
 
           console.log("[v0] Loaded question sets:", {
             category,
@@ -389,12 +398,27 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
   const handleResumeProgress = () => {
     const progress = seriesProgress[resumeSetId]
     if (progress && selectedSet) {
-      const processedQuestions = shuffleQuestionsIfNeeded(selectedSet.questions)
+      // Set shuffle options FIRST before processing questions
+      setIsShuffleQuestions(progress.shuffleQuestions)
+      setIsShuffleAnswers(progress.shuffleAnswers)
+      
+      // Process questions with the restored shuffle settings
+      let processedQuestions = convertQuestions(selectedSet.questions)
+      
+      if (progress.shuffleQuestions) {
+        processedQuestions = shuffleArray(processedQuestions)
+      }
+      
+      if (progress.shuffleAnswers) {
+        processedQuestions = processedQuestions.map((q) => ({ 
+          ...q, 
+          options: shuffleArray([...q.options]) 
+        }))
+      }
+      
       setQuestions(processedQuestions)
       setCurrentQuestion(progress.currentQuestion)
       setAnswers(progress.answers)
-      setIsShuffleQuestions(progress.shuffleQuestions)
-      setIsShuffleAnswers(progress.shuffleAnswers)
       setQuizStarted(true)
       setShowResumeDialog(false)
     }
@@ -478,9 +502,10 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
     }
 
     if (isShuffleAnswers) {
-      setQuestions(shuffleAnswers(processedQuestions))
-    } else {
-      setQuestions(processedQuestions)
+      processedQuestions = processedQuestions.map((q) => ({ 
+        ...q, 
+        options: shuffleArray([...q.options]) 
+      }))
     }
 
     return processedQuestions
