@@ -1,6 +1,10 @@
 /**
  * Centralized logging utility for the application
  * Can be easily toggled on/off and configured for different log levels
+ * 
+ * Environment variables:
+ * NEXT_PUBLIC_DEBUG_LOGS=true/false
+ * NEXT_PUBLIC_LOG_LEVEL=debug|info|warn|error
  */
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
@@ -9,12 +13,6 @@ interface LoggerConfig {
   enabled: boolean
   level: LogLevel
   prefix: string
-}
-
-const defaultConfig: LoggerConfig = {
-  enabled: process.env.NEXT_PUBLIC_DEBUG_LOGS === 'true',
-  level: (process.env.NEXT_PUBLIC_LOG_LEVEL as LogLevel) || 'info',
-  prefix: '[v0]',
 }
 
 const logLevelPriority: Record<LogLevel, number> = {
@@ -27,8 +25,26 @@ const logLevelPriority: Record<LogLevel, number> = {
 class Logger {
   private config: LoggerConfig
 
-  constructor(config: Partial<LoggerConfig> = {}) {
-    this.config = { ...defaultConfig, ...config }
+  constructor() {
+    this.config = this.loadConfig()
+  }
+
+  private loadConfig(): LoggerConfig {
+    // Dynamically read environment variables at runtime
+    const isClient = typeof window !== 'undefined'
+    const debugLogsEnv = isClient 
+      ? window.__NEXT_PUBLIC_DEBUG_LOGS__ ?? (process.env.NEXT_PUBLIC_DEBUG_LOGS === 'true')
+      : (process.env.NEXT_PUBLIC_DEBUG_LOGS === 'true')
+    
+    const logLevelEnv = isClient
+      ? window.__NEXT_PUBLIC_LOG_LEVEL__ ?? (process.env.NEXT_PUBLIC_LOG_LEVEL || 'info')
+      : (process.env.NEXT_PUBLIC_LOG_LEVEL || 'info')
+
+    return {
+      enabled: debugLogsEnv === true || debugLogsEnv === 'true',
+      level: (logLevelEnv as LogLevel) || 'info',
+      prefix: '[v0]',
+    }
   }
 
   setConfig(config: Partial<LoggerConfig>) {
