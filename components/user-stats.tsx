@@ -24,19 +24,17 @@ export function UserStatsPanel({ refreshTrigger, onDataReset, category = "radar"
     if (username) {
       loadStats()
     }
-  }, [username, refreshTrigger, category]) // Added category to dependency array
+  }, [username, refreshTrigger, category])
 
   const loadStats = async () => {
     if (!username) return
 
-    console.log("[v0] Loading user stats for:", username, "category:", category)
     try {
       const userStats = await getUserStats(username, category)
-      console.log("[v0] User stats loaded:", userStats)
       setStats(userStats)
       setIsNewUser(userStats.totalQuizzes === 0)
     } catch (error) {
-      console.error("[v0] Error loading stats:", error)
+      console.error("Error loading stats:", error)
     } finally {
       setLoading(false)
     }
@@ -59,7 +57,7 @@ export function UserStatsPanel({ refreshTrigger, onDataReset, category = "radar"
         onDataReset()
       }
     } catch (error) {
-      console.error("[v0] Error resetting stats:", error)
+      console.error("Error resetting stats:", error)
       alert("Er is een fout opgetreden bij het resetten van je statistieken.")
     } finally {
       setResetting(false)

@@ -346,7 +346,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
 
   const saveProgress = async () => {
     if (!username || !selectedSet || isAnonymous) {
-      console.log("[v0] No progress to save")
       return
     }
     try {
@@ -361,6 +360,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
         timestamp: new Date().toISOString(),
       }
 
+      console.log("[v0] Saving progress:", { setId: selectedSet.id, currentQuestion, answersCount: answers?.length })
       await saveQuizProgress(progressData, category)
 
       // Update local seriesProgress state immediately
@@ -652,6 +652,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
     const percentage = Math.round((score / questions.length) * 100)
 
     try {
+      console.log("[v0] Saving quiz result:", { setId: selectedSet.id, score, percentage })
       await saveQuizResult(
         {
           username: username,
