@@ -180,11 +180,14 @@ export function parseQuestionsFromText(text: string): ParsedQuestion[] {
       console.log(`[v0] Detected correct answer for question ${number}: ${correctAnswer}`)
     }
 
-    const optionsStartMatch = questionContent.match(/\n[a-f]\)/)
+    const optionsStartMatch = questionContent.match(/\n[a-f][).]/)
     if (!optionsStartMatch || optionsStartMatch.index === undefined) {
       console.log(`[v0] No options found for question ${number}, skipping`)
       continue
     }
+
+    // Detect which separator is used: ) or .
+    const optionSeparator = optionsStartMatch[0].includes(")") ? ")" : "\\."
 
     const optionsStartIndex = optionsStartMatch.index
     const questionText = questionContent.substring(0, optionsStartIndex).trim()
@@ -222,10 +225,10 @@ export function parseQuestionsFromText(text: string): ParsedQuestion[] {
       const currentLabel = optionLabels[j]
       const nextLabel = j < optionLabels.length - 1 ? optionLabels[j + 1] : null
 
-      // Build pattern: a) ... until next option letter or "Juist antwoord" or end
-      let pattern = `${currentLabel}\\)\\s*([\\s\\S]+?)(?=`
+      // Build pattern: a) or a. ... until next option letter or "Juist antwoord" or end
+      let pattern = `${currentLabel}${optionSeparator}\\s*([\\s\\S]+?)(?=`
       if (nextLabel) {
-        pattern += `\\n${nextLabel}\\)|`
+        pattern += `\\n${nextLabel}${optionSeparator}|`
       }
       pattern += `Juist\\s+antwoord|$)`
 
