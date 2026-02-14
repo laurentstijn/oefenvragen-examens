@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
+import { logger } from "@/lib/logger"
 import { CheckCircle2, XCircle, RotateCcw, Shuffle, ChevronLeft, AlertCircle, Flag } from "lucide-react"
 import type { Question, QuestionSet } from "@/lib/radar-data"
 import {
@@ -239,6 +240,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
           setQuestionSets(dynamicSets.length > 0 ? dynamicSets : [])
         }
       } catch (error) {
+        logger.error("Error loading questions:", error)
         setQuestionSets([])
       } finally {
         setIsLoadingQuestions(false)
