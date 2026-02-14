@@ -52,7 +52,41 @@ export async function extractTextFromPDF(file: File): Promise<string> {
     const arrayBuffer = await file.arrayBuffer()
     const result = await extractText(new Uint8Array(arrayBuffer))
 
-    console.log("[v0] Extracted text length:", text?.length || 0)
+    let text = ""
+
+    // Handle different possible return formats from unpdf
+    if (typeof result === "string") {
+      text = result
+    } else if (result && typeof result === "object") {
+      // If result has a 'text' property that is an ARRAY (one string per page)
+      if ("text" in result && Array.isArray(result.text)) {
+        text = result.text.join("\n")
+      }
+      // If result has a 'text' property that is a string
+      else if ("text" in result && typeof result.text === "string") {
+        text = result.text
+      }
+      // If result has a 'pages' array with text content
+      else if ("pages" in result && Array.isArray(result.pages)) {
+        text = result.pages
+          .map((page: any) => {
+            if (typeof page === "string") return page
+            if (page && typeof page === "object" && "text" in page) return page.text
+            return ""
+          })
+          .join("\n")
+      }
+      // If result is array-like (pages directly)
+      else if (Array.isArray(result)) {
+        text = result
+          .map((page: any) => {
+            if (typeof page === "string") return page
+            if (page && typeof page === "object" && "text" in page) return page.text
+            return ""
+          })
+          .join("\n")
+      }
+    }
 
     if (!text || text.length === 0) {
       throw new Error("Geen tekst gevonden in de PDF")
@@ -60,7 +94,6 @@ export async function extractTextFromPDF(file: File): Promise<string> {
 
     return text
   } catch (error) {
-    console.error("[v0] Error extracting PDF text:", error)
     throw new Error("Kon geen tekst uit de PDF extraheren: " + (error as Error).message)
   }
 }
@@ -71,7 +104,7 @@ export { extractTextFromPDF as extractText }
  * Parse questions from extracted text and return with series name
  */
 export function parseQuestionsWithSeries(text: string): { seriesName: string; questions: ParsedQuestion[] } {
-  console.log("[v0] Starting to parse questions from text")
+
 
   const headerMatch = text.match(/^(.+?)(?=\n\d+\.)/s)
   let seriesName = "Reeks 1" // Default fallback
@@ -89,7 +122,7 @@ export function parseQuestionsWithSeries(text: string): { seriesName: string; qu
         ) || lines[lines.length - 1]
 
       seriesName = headerLine.trim()
-      console.log(`[v0] Extracted series name: "${seriesName}"`)
+
     }
   }
 
@@ -111,24 +144,24 @@ export function parseQuestionsFromText(text: string): ParsedQuestion[] {
   // Use (?:^|\n) to match start of string OR newline
   const questionBlocks = text.split(/(?:^|\n)(\d+)\.\s+/)
 
-  console.log("[v0] Found question blocks:", questionBlocks.length)
+
 
   // First element is text before first question (header), then pairs of (number, content)
   for (let i = 1; i < questionBlocks.length; i += 2) {
     const numberStr = questionBlocks[i]
     const content = questionBlocks[i + 1]
 
-    console.log(`[v0] Processing block ${i}: number="${numberStr}", content length=${content?.length || 0}`)
+
 
     if (!content) {
-      console.log(`[v0] No content for block ${i}, skipping`)
+
       continue
     }
 
     const number = Number.parseInt(numberStr)
 
     if (isNaN(number)) {
-      console.log(`[v0] Skipping non-numeric block at index ${i}: ${numberStr}`)
+
       continue
     }
 
@@ -138,12 +171,12 @@ export function parseQuestionsFromText(text: string): ParsedQuestion[] {
 
     if (correctAnswerMatch) {
       correctAnswer = correctAnswerMatch[1].toUpperCase() as "A" | "B" | "C" | "D" | "E" | "F"
-      console.log(`[v0] Detected correct answer for question ${number}: ${correctAnswer}`)
+
     }
 
     const optionsStartMatch = questionContent.match(/\n[a-f][).]/)
     if (!optionsStartMatch || optionsStartMatch.index === undefined) {
-      console.log(`[v0] No options found for question ${number}, skipping`)
+
       continue
     }
 
@@ -163,7 +196,7 @@ export function parseQuestionsFromText(text: string): ParsedQuestion[] {
       needsImage = true
       imageDescription = imageMatch[1].trim()
       cleanedQuestionText = questionText.replace(/\[AFBEELDING:\s*[^\]]+\]/gi, "").trim()
-      console.log(`[v0] Question ${number} needs image: ${imageDescription}`)
+
     } else {
       // Try to match [AFBEELDING] format (without description)
       imageMatch = questionText.match(/\[AFBEELDING\]/i)
@@ -171,7 +204,7 @@ export function parseQuestionsFromText(text: string): ParsedQuestion[] {
         needsImage = true
         imageDescription = "afbeelding vereist"
         cleanedQuestionText = questionText.replace(/\[AFBEELDING\]/gi, "").trim()
-        console.log(`[v0] Question ${number} needs image (no description provided)`)
+
       }
     }
 
@@ -206,7 +239,7 @@ export function parseQuestionsFromText(text: string): ParsedQuestion[] {
           const imageDesc = optionImageMatch[1].replace(/\n/g, " ").trim()
           optionImages[currentLabel.toUpperCase()] = imageDesc
           optionText = `[Afbeelding: ${imageDesc}]`
-          console.log(`[v0] Question ${number} option ${currentLabel} has image: ${imageDesc}`)
+
         } else {
           // Try format without description
           optionImageMatch = optionText.match(/\[AFBEELDING\]/i)
@@ -215,7 +248,7 @@ export function parseQuestionsFromText(text: string): ParsedQuestion[] {
             const imageDesc = `afbeelding voor optie ${currentLabel.toUpperCase()}`
             optionImages[currentLabel.toUpperCase()] = imageDesc
             optionText = `[Afbeelding: ${imageDesc}]`
-            console.log(`[v0] Question ${number} option ${currentLabel} has image (no description)`)
+
           }
         }
 
@@ -227,8 +260,7 @@ export function parseQuestionsFromText(text: string): ParsedQuestion[] {
     }
 
     if (!options["A"] || !options["B"]) {
-      console.log(`[v0] Question ${number} doesn't have minimum 2 options, skipping`)
-      console.log(`[v0] Options found:`, Object.keys(options))
+
       continue
     }
 
@@ -256,18 +288,10 @@ export function parseQuestionsFromText(text: string): ParsedQuestion[] {
     if (options["F"] && options["F"].length > 0) question.optionF = options["F"]
 
     questions.push(question)
-    console.log(
-      `[v0] Parsed question ${number} with ${Object.keys(options).length} options${needsImage ? " (needs image)" : ""}${optionsHaveImages ? " (options have images)" : ""}`,
-    )
+
   }
 
-  console.log("[v0] Total parsed questions:", questions.length)
-  const questionsWithAnswer = questions.filter((q) => q.correctAnswer).length
-  const questionsNeedingImages = questions.filter((q) => q.needsImage).length
-  const questionsWithImageOptions = questions.filter((q) => q.optionsHaveImages).length
-  console.log(`[v0] Detected correct answers: ${questionsWithAnswer}/${questions.length}`)
-  console.log(`[v0] Questions needing images: ${questionsNeedingImages}`)
-  console.log(`[v0] Questions with image options: ${questionsWithImageOptions}`)
+
 
   return questions
 }

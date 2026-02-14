@@ -102,7 +102,6 @@ function convertQuestions(questions: Question[]): any[] {
 function shuffleAnswers(questions: any[]): any[] {
   return questions.map((q) => {
     if (!q.options || !Array.isArray(q.options)) {
-      console.error("[v0] Question missing options array:", q)
       return q
     }
 
@@ -199,24 +198,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
             })
 
           const testReeksQuestions = loadedQuestions.filter((q) => q.reeks && q.reeks.toLowerCase().includes("test"))
-          if (testReeksQuestions.length > 0) {
-            console.log("[v0] Test reeks questions found:", testReeksQuestions.length)
-            testReeksQuestions.forEach((q, index) => {
-              const rawQ = data[q.id]
-              console.log(`[v0] Test reeks question ${index + 1}:`, {
-                id: q.id,
-                question: q.question.substring(0, 50),
-                hasQuestionImage: !!rawQ.questionImage,
-                hasImage: !!rawQ.image,
-                finalImageUsed: !!q.image,
-                hasOptionImages: !!rawQ.optionImages,
-                optionImagesKeys: rawQ.optionImages ? Object.keys(rawQ.optionImages) : [],
-                rawImageFields: Object.keys(rawQ).filter((k) => k.toLowerCase().includes("image")),
-              })
-            })
-          }
-
-          console.log("[v0] Loaded", loadedQuestions.length, "Firebase questions for", categoryId)
 
           // Group questions by reeks to create sets
           const questionsByReeks: Record<string, typeof loadedQuestions> = {}
@@ -234,14 +215,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
             questionsByReeks[normalizedReeks].push(q)
           })
 
-          console.log(
-            "[v0] Questions grouped by reeks:",
-            Object.keys(questionsByReeks).map((reeks) => ({
-              reeks,
-              originalName: originalReeksNames[reeks],
-              count: questionsByReeks[reeks].length,
-            })),
-          )
+
 
           // Create question sets from reeks groups
           const dynamicSets: QuestionSet[] = Object.entries(questionsByReeks).map(([normalizedReeks, questions]) => {
@@ -260,18 +234,11 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
             }
           })
 
-          console.log("[v0] Loaded question sets:", {
-            category,
-            firebaseQuestions: Object.keys(data).length,
-            deletedQuestions: deletedIds.length,
-            totalQuestions: loadedQuestions.length,
-            sets: dynamicSets.length,
-          })
+
 
           setQuestionSets(dynamicSets.length > 0 ? dynamicSets : [])
         }
       } catch (error) {
-        console.error("[v0] Error loading questions:", error)
         setQuestionSets([])
       } finally {
         setIsLoadingQuestions(false)
@@ -295,7 +262,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
         flagged.forEach((id) => (flags[id] = true))
         setQuestionFlags(flags)
       } catch (error) {
-        console.error("[v0] Error loading flagged questions:", error)
+        // Ignore
       }
     }
 
@@ -328,7 +295,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
       const attempts = await getSeriesAttempts(username, category)
       setSeriesAttempts(attempts)
     } catch (error) {
-      console.error("[v0] Error loading series attempts:", error)
+      // Ignore
     }
   }
 
@@ -339,13 +306,12 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
       const progress = await getAllQuizProgress(username, category)
       setSeriesProgress(progress)
     } catch (error) {
-      console.error("[v0] Error loading series progress:", error)
+      // Ignore
     }
   }
 
   const saveProgress = async () => {
     if (!username || !selectedSet || isAnonymous) {
-      console.log("[v0] No progress to save")
       return
     }
     try {
@@ -368,7 +334,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
         [selectedSet.id]: progressData,
       }))
     } catch (error) {
-      console.error("[v0] Error saving progress:", error)
+      // Ignore
     }
   }
 
@@ -379,7 +345,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
       const incorrectIds = await getIncorrectQuestions(username, category)
       setWrongAnswersCount(incorrectIds.length)
     } catch (error) {
-      console.error("[v0] Error loading wrong answers:", error)
+      // Ignore
     }
   }
 
@@ -459,7 +425,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
           questions: incorrectQuestions,
         })
       } catch (error) {
-        console.error("[v0] Error loading incorrect questions:", error)
         setSelectedSet({
           id: "wrong-answers",
           name: "Al mijn fouten",
@@ -521,7 +486,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
     }
 
     if (!answers || !Array.isArray(answers)) {
-      console.error("[v0] answers is not an array:", answers)
       setAnswers([])
       return
     }
@@ -533,13 +497,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
     const currentQ = questions[currentQuestion]
     const isCorrect = selectedAnswer.toUpperCase() === currentQ.correctAnswer?.toUpperCase()
 
-    console.log("[v0] Question answered:", {
-      questionId: currentQ.id,
-      hasImage: !!currentQ.image,
-      isCorrect,
-      isWrongAnswersMode,
-    })
-
     try {
       if (isCorrect) {
         await removeIncorrectQuestion(username, currentQ.id, category)
@@ -549,7 +506,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
         await loadWrongAnswers()
       }
     } catch (error) {
-      console.error("[v0] Error updating incorrect questions:", error)
+      // Ignore
     }
 
     if (username && selectedSet && !isAnonymous) {
@@ -598,12 +555,12 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
         setQuestionFlags((prev) => ({ ...prev, [questionId]: true }))
         setFlaggedQuestions((prev) => [...prev, questionId])
         toast({
-          title: "Vraag gemarkeerd",
-          description: "De vraag is gemarkeerd voor review",
+          title: "Fout",
+          description: "Er is een fout opgetreden",
         })
       }
-    } catch (error) {
-      console.error("[v0] Error toggling flag:", error)
+    }
+  }
       toast({
         title: "Fout",
         description: "Er is een fout opgetreden bij het markeren van de vraag",
@@ -671,14 +628,13 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
         },
         category,
       )
-      console.log("[v0] Quiz result saved successfully")
       await clearQuizProgress(username, selectedSet.id, category)
       await loadSeriesAttempts()
       await loadWrongAnswers()
       await loadAllSeriesProgress()
       onQuizComplete?.()
     } catch (error) {
-      console.error("[v0] Failed to save quiz result:", error)
+      // Ignore
     }
   }
 
@@ -709,7 +665,7 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
         setSelectedSet(set)
       }
     } catch (error) {
-      console.error("[v0] Error loading quiz progress:", error)
+      // Ignore
     }
   }
 
@@ -1127,10 +1083,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
               alt="Vraag afbeelding"
               className="max-w-full sm:max-w-xs h-auto mx-auto max-h-24 sm:max-h-32 object-contain"
               onError={(e) => {
-                console.error(
-                  "[v0] Failed to load question image:",
-                  questions[currentQuestion].image?.substring(0, 100),
-                )
                 e.currentTarget.style.display = "none"
               }}
             />
@@ -1181,7 +1133,6 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
                       alt={`Antwoord ${option.label}`}
                       className="max-w-full sm:max-w-xs h-auto mx-auto max-h-24 sm:max-h-32 object-contain"
                       onError={(e) => {
-                        console.error("[v0] Failed to load answer image for option:", option.label)
                         e.currentTarget.style.display = "none"
                       }}
                     />

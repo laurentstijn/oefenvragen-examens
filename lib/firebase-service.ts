@@ -124,7 +124,6 @@ export async function checkUsernameExists(username: string): Promise<boolean> {
     const userData = await firebaseGet(`users/${encodedUsername}`)
     return userData !== null
   } catch (error) {
-    console.error("[v0] Error checking username:", error)
     return false
   }
 }
@@ -144,7 +143,6 @@ export async function createUser(username: string, password: string): Promise<vo
       quizResults: {},
     })
   } catch (error) {
-    console.error("[v0] Error creating user:", error)
     throw error
   }
 }
@@ -162,7 +160,6 @@ export async function verifyPassword(username: string, password: string): Promis
     const hashedPassword = await hashPassword(password)
     return userData.password === hashedPassword
   } catch (error) {
-    console.error("[v0] Error verifying password:", error)
     return false
   }
 }
@@ -177,7 +174,6 @@ export async function saveQuizResult(result: QuizResult, category = "radar") {
     })
     return result.setId
   } catch (error) {
-    console.error("[v0] Error saving quiz result:", error)
     throw error
   }
 }
@@ -219,7 +215,6 @@ export async function getUserStats(username: string, category = "radar"): Promis
       recentQuizzes,
     }
   } catch (error) {
-    console.error("[v0] Error getting user stats:", error)
     return defaultStats
   }
 }
@@ -241,7 +236,6 @@ export async function getSetResults(username: string, setId: string, category = 
     results.sort((a, b) => parseTimestamp(b.timestamp).getTime() - parseTimestamp(a.timestamp).getTime())
     return results.slice(0, 5)
   } catch (error) {
-    console.error("[v0] Error getting set results:", error)
     return []
   }
 }
@@ -255,7 +249,6 @@ export async function resetUserStats(username: string, category = "radar"): Prom
     await firebaseRemove(`users/${encodedUsername}/${category}/quizResults`)
     await firebaseRemove(`users/${encodedUsername}/${category}/incorrectQuestions`)
   } catch (error) {
-    console.error("[v0] Error resetting user stats:", error)
     throw error
   }
 }
@@ -279,7 +272,6 @@ export async function getSeriesAttempts(username: string, category = "radar"): P
     
     return attemptCounts
   } catch (error) {
-    console.error("[v0] Error getting series attempts:", error)
     return {}
   }
 }
@@ -295,7 +287,6 @@ export async function saveQuizProgress(progress: QuizProgress, category = "radar
     }
     await firebaseSet(`users/${encodedUsername}/${category}/quizProgress/${progress.setId}`, cleanedProgress)
   } catch (error) {
-    console.error("[v0] Error saving quiz progress:", error)
     throw error
   }
 }
@@ -311,7 +302,6 @@ export async function getQuizProgress(
     const data = await firebaseGet(`users/${encodedUsername}/${category}/quizProgress/${setId}`)
     return data as QuizProgress | null
   } catch (error) {
-    console.error("[v0] Error getting quiz progress:", error)
     return null
   }
 }
@@ -329,7 +319,6 @@ export async function getAllQuizProgress(username: string, category = "radar"): 
     
     return data as Record<string, QuizProgress>
   } catch (error) {
-    console.error("[v0] Error getting all quiz progress:", error)
     return {}
   }
 }
@@ -340,7 +329,7 @@ export async function clearQuizProgress(username: string, setId: string, categor
     const encodedUsername = encodeUserKey(username)
     await firebaseRemove(`users/${encodedUsername}/${category}/quizProgress/${setId}`)
   } catch (error) {
-    console.error("[v0] Error clearing quiz progress:", error)
+    // Ignore
   }
 }
 
@@ -356,7 +345,6 @@ export async function getWrongAnswers(
       correctAnswer: "", // Will be filled from questions data
     }))
   } catch (error) {
-    console.error("[v0] Error getting wrong answers:", error)
     return []
   }
 }
@@ -370,7 +358,6 @@ export async function addIncorrectQuestion(username: string, questionId: number,
       addedAt: new Date().toISOString(),
     })
   } catch (error) {
-    console.error("[v0] Error adding incorrect question:", error)
     throw error
   }
 }
@@ -381,7 +368,7 @@ export async function removeIncorrectQuestion(username: string, questionId: numb
     const encodedUsername = encodeUserKey(username)
     await firebaseRemove(`users/${encodedUsername}/${category}/incorrectQuestions/${questionId}`)
   } catch (error) {
-    console.error("[v0] Error removing incorrect question:", error)
+    // Ignore
   }
 }
 
@@ -399,7 +386,6 @@ export async function getIncorrectQuestions(username: string, category = "radar"
     const incorrectIds: number[] = Object.values(data).map((item: any) => item.questionId)
     return incorrectIds.sort((a, b) => a - b)
   } catch (error) {
-    console.error("[v0] Error getting incorrect questions:", error)
     return []
   }
 }
@@ -416,7 +402,6 @@ export async function userHasPassword(username: string): Promise<boolean> {
     
     return !!userData.password
   } catch (error) {
-    console.error("[v0] Error checking if user has password:", error)
     return false
   }
 }
@@ -428,7 +413,6 @@ export async function setPasswordForUser(username: string, password: string): Pr
     const encodedUsername = encodeUserKey(username)
     await firebaseSet(`users/${encodedUsername}/password`, hashedPassword)
   } catch (error) {
-    console.error("[v0] Error setting password for user:", error)
     throw error
   }
 }
@@ -450,7 +434,6 @@ export async function checkAdminAccess(email: string): Promise<boolean> {
     const isAdmin = await firebaseGet(`admins/${encodedEmail}`)
     return isAdmin === true
   } catch (error) {
-    console.error("[v0] Error checking admin access:", error)
     return false
   }
 }
@@ -485,7 +468,6 @@ export async function getAllCategories(): Promise<SavedCategory[]> {
     const categories: SavedCategory[] = Object.values(data)
     return categories
   } catch (error) {
-    console.error("[v0] Error getting all categories:", error)
     return []
   }
 }
@@ -513,7 +495,6 @@ export async function deleteCategory(categoryId: string): Promise<void> {
       }
     }
   } catch (error) {
-    console.error("[v0] Error deleting category:", error)
     throw error
   }
 }
@@ -522,9 +503,7 @@ export async function saveCategoryStatus(categoryId: string, status: string): Pr
   try {
     const { firebaseSet } = await import("./firebase-rest")
     await firebaseSet(`categoryStatus/${categoryId}`, status)
-    console.log("[v0] Category status saved:", categoryId, status)
   } catch (error) {
-    console.error("[v0] Error saving category status:", error)
     throw error
   }
 }
@@ -540,7 +519,6 @@ export async function getCategoryStatus(categoryId: string): Promise<string | nu
     
     return typeof data === "string" ? data : data.status
   } catch (error) {
-    console.error("[v0] Error getting category status:", error)
     return null
   }
 }
@@ -561,7 +539,6 @@ export async function getAllCategoryStatuses(): Promise<{ [key: string]: string 
     
     return statuses
   } catch (error) {
-    console.error("[v0] Error getting all category statuses:", error)
     return {}
   }
 }
@@ -572,7 +549,6 @@ export async function getAllQuestions(category: string): Promise<Record<string, 
     const data = await firebaseGet(`questions/${category}`)
     return data as Record<string, any> || {}
   } catch (error) {
-    console.error("[v0] Error getting Firebase questions:", error)
     return {}
   }
 }
@@ -588,7 +564,6 @@ export async function getDeletedQuestions(category: string): Promise<string[]> {
     
     return Object.keys(data)
   } catch (error) {
-    console.error("[v0] Error getting deleted questions:", error)
     return []
   }
 }
@@ -647,7 +622,6 @@ export async function migrateTimestamps(): Promise<{
       details: migrationDetails,
     }
   } catch (error) {
-    console.error("[v0] Error during timestamp migration:", error)
     return {
       success: false,
       message: "Fout tijdens migratie: " + (error instanceof Error ? error.message : "Onbekende fout"),
@@ -723,7 +697,6 @@ export async function migrateStaticQuestionsToFirebase() {
 
     return { success: errors.length === 0, radarMigrated, radarSkipped, matrozenMigrated, matrozenSkipped, errors }
   } catch (error) {
-    console.error("[v0] Migration failed:", error)
     throw error
   }
 }
@@ -772,7 +745,6 @@ export async function updateExistingQuestionsWithReeks() {
 
     return { success: errors.length === 0, radarUpdated, matrozenUpdated, errors }
   } catch (error) {
-    console.error("[v0] Update failed:", error)
     throw error
   }
 }
@@ -817,7 +789,6 @@ export async function renameSeriesInCategory(
 
     return { success: true, updatedCount }
   } catch (error) {
-    console.error("[v0] Error renaming series:", error)
     throw error
   }
 }
@@ -850,8 +821,7 @@ export async function deleteSeriesFromCategory(
 
     return { success: true, deletedCount }
   } catch (error) {
-    console.error("[v0] Error deleting series:", error)
-    return { success: false, deletedCount: 0 }
+    return undefined
   }
 }
 
@@ -909,8 +879,7 @@ export async function renameCategoryId(
 
     return { success: true, movedQuestionsCount: movedCount }
   } catch (error) {
-    console.error("Error renaming category ID:", error)
-    return { success: false, movedQuestionsCount: 0 }
+    return []
   }
 }
 
@@ -933,7 +902,6 @@ export async function flagQuestion(
       timestamp: new Date().toISOString(),
     })
   } catch (error) {
-    console.error("[v0] Error flagging question:", error)
     throw error
   }
 }
@@ -944,7 +912,7 @@ export async function unflagQuestion(username: string, questionId: string, categ
     const encodedUsername = encodeUserKey(username)
     await firebaseRemove(`questionFlags/${categoryId}/${questionId}/${encodedUsername}`)
   } catch (error) {
-    console.error("[v0] Error unflagging question:", error)
+    throw error
   }
 }
 
@@ -955,7 +923,6 @@ export async function isQuestionFlagged(questionId: string, categoryId: string, 
     const data = await firebaseGet(`questionFlags/${categoryId}/${questionId}/${encodedUsername}`)
     return data !== null
   } catch (error) {
-    console.error("[v0] Error checking if question is flagged:", error)
     return false
   }
 }
@@ -1002,7 +969,6 @@ export async function getAllFlaggedQuestions(categoryId?: string): Promise<Quest
 
     return flags.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
   } catch (error) {
-    console.error("[v0] Error getting flagged questions:", error)
     return []
   }
 }
@@ -1028,7 +994,6 @@ export async function getUserFlaggedQuestions(username: string, categoryId: stri
     
     return flaggedIds
   } catch (error) {
-    console.error("[v0] Error getting user flagged questions:", error)
     return []
   }
 }
@@ -1046,7 +1011,6 @@ export async function getAllAdminEmails(): Promise<string[]> {
     // Admins are stored as { "email,com": true } - decode the keys
     return Object.keys(data).map(key => key.replace(/,/g, "."))
   } catch (error) {
-    console.error("[v0] Error getting admin emails:", error)
     return []
   }
 }
@@ -1063,8 +1027,7 @@ export async function initializeFirstAdmin(email: string): Promise<boolean> {
 
     return false
   } catch (error) {
-    console.error("[v0] Error initializing first admin:", error)
-    return false
+    // Ignore
   }
 }
 
@@ -1073,7 +1036,6 @@ export async function addAdminEmail(email: string): Promise<void> {
     const { firebaseSet } = await import("./firebase-rest")
     await firebaseSet(`admins/${email.replace(/\./g, ",")}`, true)
   } catch (error) {
-    console.error("[v0] Error adding admin email:", error)
     throw error
   }
 }
@@ -1083,7 +1045,7 @@ export async function removeAdminEmail(email: string): Promise<void> {
     const { firebaseRemove } = await import("./firebase-rest")
     await firebaseRemove(`admins/${email.replace(/\./g, ",")}`)
   } catch (error) {
-    console.error("[v0] Error removing admin email:", error)
+    return []
   }
 }
 
@@ -1103,7 +1065,6 @@ export async function saveCategory(
       createdAt: new Date().toISOString(),
     })
   } catch (error) {
-    console.error("[v0] Error saving category:", error)
     throw error
   }
 }
@@ -1116,8 +1077,7 @@ export async function getCategory(categoryId: string): Promise<SavedCategory | n
     const data = await firebaseGet(`categories/${categoryId}`)
     return data as SavedCategory | null
   } catch (error) {
-    console.error("[v0] Error getting category:", error)
-    return null
+    throw error
   }
 }
 
@@ -1127,7 +1087,6 @@ export async function saveQuestionToFirebase(category: string, question: any): P
     const questionKey = `${category}-${question.id}`
     await firebaseSet(`questions/${category}/${questionKey}`, question)
   } catch (error) {
-    console.error("[v0] Error saving question to Firebase:", error)
     throw error
   }
 }
@@ -1138,7 +1097,6 @@ export async function loadQuestionsFromFirebase(category: string): Promise<Recor
     const data = await firebaseGet(`questions/${category}`)
     return data as Record<string, any> || {}
   } catch (error) {
-    console.error("[v0] Error loading questions from Firebase:", error)
-    return {}
+    throw error
   }
 }
