@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label"
 
 import type React from "react"
 import { useToast } from "@/components/ui/use-toast"
-import { Trash2, X, Plus, FileText, Upload, Pencil, Download, RotateCcw, Flag, FileDown, Edit } from "lucide-react" // Added Flag icon, FileDown, Edit icons
+import { Trash2, X, Plus, FileText, Upload, Pencil, Download, RotateCcw, Flag, FileDown, Edit, Loader2 } from "lucide-react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -43,9 +43,8 @@ import {
   extractText, // Imported extractText
 } from "@/lib/pdf-parser" // Updated import to include parseQuestionsWithSeries
 import { cn } from "@/lib/utils"
-import { db } from "@/lib/firebase"
-import { ref as refDB, set, remove, get, update } from "firebase/database"
-import { useAuth } from "@/contexts/auth-context" // Import AuthContext
+import { firebaseGet, firebaseSet, firebaseRemove, firebaseUpdate } from "@/lib/firebase-rest"
+import { useAuth } from "@/contexts/auth-context"
 import {
   Dialog,
   DialogContent,
@@ -53,9 +52,8 @@ import {
   DialogTitle,
   DialogFooter,
   DialogDescription,
-} from "@/components/ui/dialog" // Import Dialog components
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group" // Import RadioGroup components
-import { getAuth } from "firebase/auth" // Import getAuth
+} from "@/components/ui/dialog"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 
 // --- FIX START ---
 // FIX: The type Question was undeclared. Imported it from a relevant module.
@@ -91,7 +89,6 @@ export default function AdminPage() {
   const [isAdmin, setIsAdmin] = useState(false) // New state for admin check
   const router = useRouter()
   const { toast } = useToast()
-  const auth = getAuth() // Initialize Firebase Auth
 
   const [categoryStatuses, setCategoryStatuses] = useState<Record<string, CategoryStatus>>({})
   const [isLoadingStatuses, setIsLoadingStatuses] = useState(true)
@@ -117,6 +114,16 @@ export default function AdminPage() {
   const [showStaticMigration, setShowStaticMigration] = useState(false)
   const [staticMigrationResult, setStaticMigrationResult] = useState<any>(null)
   const [isStaticMigrating, setIsStaticMigrating] = useState(false)
+
+  const [pdfExportCategory, setPdfExportCategory] = useState("")
+  const [pdfExportReeks, setPdfExportReeks] = useState("all")
+  const [isExportingPdf, setIsExportingPdf] = useState(false)
+  const [pdfShowCorrectAnswers, setPdfShowCorrectAnswers] = useState(true)
+  const [pdfIncludeImages, setPdfIncludeImages] = useState(true)
+  const [pdfAvailableReeksen, setPdfAvailableReeksen] = useState<string[]>([])
+  const [totalQuestionsCount, setTotalQuestionsCount] = useState(0)
+  const [totalFlaggedCount, setTotalFlaggedCount] = useState(0)
+  const [flaggedCountPerCategory, setFlaggedCountPerCategory] = useState<Record<string, number>>({})
 
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [uploadMethod, setUploadMethod] = useState<"text" | "pdf">("text")
@@ -207,6 +214,7 @@ export default function AdminPage() {
   const [editingCategoryIconPreview, setEditingCategoryIconPreview] = useState<string>("")
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
   const [editingCategoryName, setEditingCategoryName] = useState("")
+  const [editingCategoryDescription, setEditingCategoryDescription] = useState("")
   const [isLoading, setIsLoading] = useState(true) // Added loading state
 
   const [showReeksUpdate, setShowReeksUpdate] = useState(false)
@@ -247,7 +255,7 @@ export default function AdminPage() {
   const [isLoadingFlags, setIsLoadingFlags] = useState(false)
   const [selectedFlagCategory, setSelectedFlagCategory] = useState<string>("radar")
 
-  const [activeTab, setActiveTab] = useState<"categories" | "questions" | "stats">("categories")
+  const [activeTab, setActiveTab] = useState<"categories" | "stats" | "database">("categories")
 
   const handleOpenFlaggedQuestion = useCallback(
     (questionId: string, categoryId: string) => {
@@ -306,10 +314,7 @@ export default function AdminPage() {
 
   const handleResetAnonymousClicks = async () => {
     try {
-      const analyticsRef = refDB(db, "analytics/anonymousClicks") // FIX: database renamed to db
-      await set(analyticsRef, 0)
-      console.log("[v0] Reset anonymous clicks counter to 0")
-      // Reload statistics
+      await firebaseSet("analytics/anonymousClicks", 0)
       await loadUserStatistics()
     } catch (error) {
       console.error("[v0] Error resetting anonymous clicks:", error)
@@ -319,15 +324,13 @@ export default function AdminPage() {
   const loadUserStatistics = useCallback(async () => {
     setIsLoadingStats(true)
     try {
-      const clicksRef = refDB(db, "analytics/anonymousClicks")
-      const clicksSnapshot = await get(clicksRef)
-      const anonymousClicks = clicksSnapshot.exists() ? clicksSnapshot.val() : 0
+      // Load both in parallel
+      const [anonymousClicks, users] = await Promise.all([
+        firebaseGet("analytics/anonymousClicks"),
+        firebaseGet("users")
+      ])
 
-      const usersRef = refDB(db, "users")
-      const snapshot = await get(usersRef)
-
-      if (snapshot.exists()) {
-        const users = snapshot.val()
+      if (users) {
         let totalUsers = 0
         let totalQuizResults = 0
         let recentActiveUsers = 0
@@ -497,7 +500,7 @@ export default function AdminPage() {
           hasCorrectAnswer: !!question.correctAnswer,
         })
 
-        await set(refDB(db, `questions/${categoryId}/${questionKey}`), {
+        await firebaseSet(`questions/${categoryId}/${questionKey}`, {
           id: i + 1,
           question: question.text,
           options: {
@@ -553,7 +556,7 @@ export default function AdminPage() {
 
       await saveCategory(categoryId, name, description || `Oefenvragen voor ${name}`)
 
-      await set(refDB(db, `categoryStatus/${categoryId}`), "non-actief")
+      await firebaseSet(`categoryStatus/${categoryId}`, "non-actief")
 
       // Update local state and reload categories
       setAllCategories((prev) => [...prev, { id: categoryId, name, description, status: "non-actief" }])
@@ -572,38 +575,59 @@ export default function AdminPage() {
     }
   }
 
-  // FIXED: Moved useEffect dependencies to ensure it runs correctly
+  // FIXED: Check both regular auth and admin localStorage session
   useEffect(() => {
     const checkAuth = async () => {
-      console.log("[v0] Admin check starting...")
-      console.log("[v0] authLoading:", authLoading)
-      console.log("[v0] email:", email)
-      console.log("[v0] username:", username)
+      // First check localStorage for admin session
+      const adminEmail = localStorage.getItem("adminEmail")
+      const adminLoggedIn = localStorage.getItem("adminLoggedIn")
+      
+      if (adminLoggedIn === "true" && adminEmail) {
+        // Verify admin status via REST API
+        const { checkAdminAccess } = await import("@/lib/firebase-service")
+        const isAdminUser = await checkAdminAccess(adminEmail)
+        
+        if (isAdminUser) {
+          setIsAdmin(true)
+          setIsCheckingCheckingAuth(false)
+          return
+        }
+      }
 
+      // Fallback to regular auth context
       if (authLoading) {
-        console.log("[v0] Still loading auth, waiting...")
         return
       }
 
       if (!email) {
-        console.log("[v0] No email found, redirecting to home")
         toast({
           title: "Geen toegang",
           description: "Log eerst in met een admin account",
           variant: "destructive",
         })
-        router.push("/")
+        router.push("/admin/login")
         return
       }
 
-      // Anyone with a Firebase account can access admin panel
-      console.log("[v0] Email found, granting admin access")
-      setIsAdmin(true)
-      setIsCheckingCheckingAuth(false)
+      // Check if regular user is admin
+      const { checkAdminAccess } = await import("@/lib/firebase-service")
+      const isAdminUser = await checkAdminAccess(email)
+      
+      if (isAdminUser) {
+        setIsAdmin(true)
+        setIsCheckingCheckingAuth(false)
+      } else {
+        toast({
+          title: "Geen toegang",
+          description: "Je hebt geen admin rechten",
+          variant: "destructive",
+        })
+        router.push("/")
+      }
     }
 
     checkAuth()
-  }, [email, authLoading, router, toast, username]) // Added all dependencies
+  }, [email, authLoading, router, toast, username])
 
   const getCategoryStatusDisplay = (categoryId: string) => {
     return categoryStatuses[categoryId] || "actief"
@@ -640,30 +664,52 @@ export default function AdminPage() {
     }
 
     try {
-      console.log("[v0] Loading Firebase questions for category:", currentCategoryId)
-      const questionsRef = refDB(db, `questions/${currentCategoryId}`)
-      const snapshot = await get(questionsRef)
-
-      if (snapshot.exists()) {
-        const data = snapshot.val()
+      const data = await firebaseGet(`questions/${currentCategoryId}`)
+      if (data) {
         setFirebaseQuestions(data)
-        console.log("[v0] Loaded", Object.keys(data).length, "Firebase questions for", currentCategoryId)
-        const firstQuestionKey = Object.keys(data)[0]
-        if (firstQuestionKey) {
-          console.log("[v0] First question data from Firebase:", {
-            key: firstQuestionKey,
-            hasCorrectAnswer: !!data[firstQuestionKey].correctAnswer,
-            correctAnswer: data[firstQuestionKey].correctAnswer,
-            hasOptions: !!data[firstQuestionKey].options,
-          })
-        }
       } else {
         setFirebaseQuestions({})
-        console.log("[v0] No Firebase questions found for", currentCategoryId)
       }
     } catch (error) {
       console.error("[v0] Error loading Firebase questions:", error)
       setFirebaseQuestions({})
+    }
+  }
+
+  // Function to load total question count from all categories (parallel)
+  const loadTotalQuestionsCount = async () => {
+    try {
+      const results = await Promise.all(
+        allCategories.map(cat => firebaseGet(`questions/${cat.id}`))
+      )
+      const total = results.reduce((sum, data) => {
+        return sum + (data ? Object.keys(data).length : 0)
+      }, 0)
+      setTotalQuestionsCount(total)
+    } catch (error) {
+      console.error("Error loading total questions count:", error)
+    }
+  }
+
+  // Function to load total flagged questions count from all categories (parallel)
+  const loadTotalFlaggedCount = async () => {
+    try {
+      const results = await Promise.all(
+        allCategories.map(async cat => {
+          const flags = await getAllFlaggedQuestions(cat.id)
+          return { catId: cat.id, count: flags.length }
+        })
+      )
+      const perCategory: Record<string, number> = {}
+      let total = 0
+      for (const result of results) {
+        perCategory[result.catId] = result.count
+        total += result.count
+      }
+      setFlaggedCountPerCategory(perCategory)
+      setTotalFlaggedCount(total)
+    } catch (error) {
+      console.error("Error loading total flagged count:", error)
     }
   }
 
@@ -675,47 +721,17 @@ export default function AdminPage() {
     }
 
     try {
-      const deletedRef = refDB(db, `deletedQuestions/${selectedCategory}`)
-      const snapshot = await get(deletedRef)
-
-      if (snapshot.exists()) {
-        const data = snapshot.val()
+      const data = await firebaseGet(`deletedQuestions/${selectedCategory}`)
+      if (data) {
         const deletedSet = new Set<string>(Object.keys(data))
         setDeletedQuestions(deletedSet)
-        console.log("[v0] Loaded", deletedSet.size, "deleted question markers")
       } else {
         setDeletedQuestions(new Set())
       }
     } catch (error: any) {
-      if (error?.code === "PERMISSION_DENIED" || error?.message?.includes("Permission denied")) {
-        console.log("[v0] Note: Firebase 'deletedQuestions' node needs permissions. Update rules in Firebase Console.")
-      } else {
-        console.error("[v0] Error loading deleted questions:", error)
-      }
       setDeletedQuestions(new Set())
     }
   }
-
-  /*
-  const loadSavedEdits = async () => {
-    try {
-      const editsRef = refDB(db, "questionEdits")
-      const snapshot = await get(editsRef)
-
-      if (snapshot.exists()) {
-        const editsData = snapshot.val()
-        setSavedEdits(editsData)
-        console.log("[v0] Loaded", Object.keys(editsData).length, "question edits from Firebase")
-        console.log("[v0] Loaded", Object.keys(editsData).length, "saved edits")
-      } else {
-        setSavedEdits({})
-      }
-    } catch (error) {
-      console.error("[v0] Error loading saved edits:", error)
-      setSavedEdits({})
-    }
-  }
-  */
 
   // MEMOIZE loadQuestions and loadSavedEdits for use in useCallback
   const memoizedLoadQuestions = useCallback(loadQuestions, [selectedCategory])
@@ -748,7 +764,7 @@ export default function AdminPage() {
 
     try {
       // Update in Firebase questions node
-      await update(refDB(db, `questions/${selectedCategory}/${questionKey}`), {
+      await firebaseUpdate(`questions/${selectedCategory}/${questionKey}`, {
         correctAnswer: answer.toUpperCase(),
       })
 
@@ -844,8 +860,48 @@ export default function AdminPage() {
   }, [])
 
   useEffect(() => {
+    if (allCategories.length > 0) {
+      loadTotalQuestionsCount()
+      loadTotalFlaggedCount()
+    }
+  }, [allCategories])
+
+  useEffect(() => {
     loadUserStatistics()
   }, [loadUserStatistics])
+
+  // Load available reeksen when PDF export category changes
+  useEffect(() => {
+    const loadPdfReeksen = async () => {
+      if (!pdfExportCategory) {
+        setPdfAvailableReeksen([])
+        return
+      }
+      try {
+        const data = await firebaseGet(`questions/${pdfExportCategory}`)
+        if (data) {
+          const reeksen = Array.from(new Set(
+            Object.values(data)
+              .map((q: any) => q.reeks)
+              .filter(Boolean)
+          )).sort((a: string, b: string) => {
+            const numA = Number.parseInt(a)
+            const numB = Number.parseInt(b)
+            if (!isNaN(numA) && !isNaN(numB)) return numA - numB
+            return a.localeCompare(b)
+          }) as string[]
+          setPdfAvailableReeksen(reeksen)
+        } else {
+          setPdfAvailableReeksen([])
+        }
+      } catch (error) {
+        console.error("Error loading PDF reeksen:", error)
+        setPdfAvailableReeksen([])
+      }
+    }
+    loadPdfReeksen()
+    setPdfExportReeks("all") // Reset reeks selection when category changes
+  }, [pdfExportCategory])
 
   // Add function to load flagged questions
   const loadFlaggedQuestions = async (category: string) => {
@@ -868,22 +924,19 @@ export default function AdminPage() {
   const isStaticCategory = false // Removed check for static categories
 
   const availableReeksOptionsWithOriginal = useMemo(() => {
-    const targetCategory = newCategoryName ? newCategoryName.toLowerCase().replace(/\s+/g, "-") : selectedCategory
-
-    if (!targetCategory) {
+    // Only use selectedCategory for computing reeks options - newCategoryName is for new categories
+    // which don't have existing reeks anyway
+    if (!selectedCategory) {
       return [
         { value: "1", label: "Reeks 1", original: "1" },
         { value: "new", label: "➕ Nieuwe reeks...", original: "" },
       ]
     }
 
-    const allQuestionIds = Object.keys(firebaseQuestions)
-
     const firebaseQs = Object.entries(firebaseQuestions)
-      .filter(([firebaseKey, q]) => {
+      .filter(([firebaseKey]) => {
         if (!firebaseKey) return false
-        const matches = firebaseKey.startsWith(targetCategory + "-")
-        return matches
+        return firebaseKey.startsWith(selectedCategory + "-")
       })
       .map(([, q]) => q)
 
@@ -907,35 +960,55 @@ export default function AdminPage() {
       })
       .map(([normalized, original]) => ({
         value: normalized,
-        label: `Reeks ${normalized}`,
+        label: normalized.toLowerCase().startsWith("reeks") ? normalized : `Reeks ${normalized}`,
         original: original,
       }))
 
-    if (options.length === 0 && !newCategoryName) {
+    if (options.length === 0) {
       options.push({ value: "1", label: "Reeks 1", original: "1" })
     }
 
     options.push({ value: "new", label: "➕ Nieuwe reeks...", original: "" })
 
     return options
-  }, [firebaseQuestions, selectedCategory, newCategoryName])
+  }, [firebaseQuestions, selectedCategory])
 
   const availableReeksOptions = useMemo(() => {
+    // For truly new categories (newCategoryName set but NOT adding to existing), show only "Nieuwe Reeks"
+    if (newCategoryName && !isAddingToExistingCategory) {
+      return [{ value: "new", label: "Nieuwe Reeks" }]
+    }
+    
+    // For existing categories, filter reeks by the target category
+    // Use selectedCategory when adding to existing, or derive from newCategoryName
+    const targetCategory = isAddingToExistingCategory 
+      ? selectedCategory 
+      : (newCategoryName ? newCategoryName.toLowerCase().replace(/\s+/g, "-") : selectedCategory)
+    
+    if (!targetCategory) {
+      return [{ value: "new", label: "Nieuwe Reeks" }]
+    }
+    
     const allReeks = new Set<string>()
-    Object.values(firebaseQuestions).forEach((q) => {
-      if (q?.reeks) {
+    Object.entries(firebaseQuestions).forEach(([key, q]) => {
+      if (key.startsWith(targetCategory + "-") && q?.reeks) {
         allReeks.add(q.reeks)
       }
     })
     const options = Array.from(allReeks)
-      .sort()
+      .sort((a, b) => {
+        const numA = Number.parseInt(a)
+        const numB = Number.parseInt(b)
+        if (!isNaN(numA) && !isNaN(numB)) return numA - numB
+        return a.localeCompare(b)
+      })
       .map((reeks) => ({
         value: reeks,
-        label: `Reeks ${reeks}`,
+        label: reeks.toLowerCase().startsWith("reeks") ? reeks : `Reeks ${reeks}`,
       }))
-    options.unshift({ value: "new", label: "Nieuwe Reeks" }) // Use "Nieuwe Reeks" for clarity in select
+    options.unshift({ value: "new", label: "Nieuwe Reeks" })
     return options
-  }, [firebaseQuestions])
+  }, [firebaseQuestions, selectedCategory, newCategoryName, isAddingToExistingCategory])
 
   useEffect(() => {
     if (selectedReeks === "all" || selectedReeks === "new") return
@@ -943,13 +1016,16 @@ export default function AdminPage() {
     const reeksExists = availableReeksOptionsWithOriginal.some((opt) => opt.value === selectedReeks)
 
     if (!reeksExists) {
-      console.log("[v0] Selected reeks", selectedReeks, "no longer exists. Resetting to 'all'")
       setSelectedReeks("all")
     }
   }, [selectedReeks, availableReeksOptionsWithOriginal])
 
-  // Removed activeTsQuestionsCount as it's no longer relevant
-  const totalQuestionsCount = Object.keys(firebaseQuestions).length // Count only Firebase questions
+  // For new categories, automatically set series to "new" since there are no existing series
+  useEffect(() => {
+    if (newCategoryName && !isAddingToExistingCategory) {
+      setUploadModalSelectedSeries("new")
+    }
+  }, [newCategoryName, isAddingToExistingCategory])
 
   // Modified to only consider Firebase questions
   const filteredQuestions = useMemo(() => {
@@ -1033,15 +1109,7 @@ export default function AdminPage() {
   const getDisplayCorrectAnswer = (question: any) => {
     const questionKey = `${selectedCategory}-${question.id}`
     const bulkAnswer = bulkEditAnswers[questionKey]
-    const finalAnswer = bulkAnswer || question.correctAnswer?.toUpperCase()
-
-    if (question.id === 1) {
-      console.log(
-        `[v0] Display answer for Q1: bulk=${bulkAnswer}, original=${question.correctAnswer}, final=${finalAnswer}`,
-      )
-    }
-
-    return finalAnswer
+    return bulkAnswer || question.correctAnswer?.toUpperCase()
   }
 
   const handleEditClick = (question: Question) => {
@@ -1128,7 +1196,7 @@ export default function AdminPage() {
       const questionKey = `${selectedCategory}-${id}`
 
       if (Object.keys(questionUpdates).length > 0) {
-        await update(refDB(db, `questions/${selectedCategory}/${questionKey}`), questionUpdates)
+        await firebaseUpdate(`questions/${selectedCategory}/${questionKey}`, questionUpdates)
         console.log(`[v0] Successfully updated question ${id} in Firebase questions node`)
       }
 
@@ -1482,7 +1550,7 @@ export default function AdminPage() {
               if (optionImages.d) optionImagesBase64.d = await convertFileToBase64(optionImages.d)
             }
 
-            await set(refDB(db, `questions/${categoryId}/${questionKey}`), {
+            await firebaseSet(`questions/${categoryId}/${questionKey}`, {
               id: globalQuestionNumber,
               question: question.text,
               options: {
@@ -1523,7 +1591,7 @@ export default function AdminPage() {
             if (optionImages.d) optionImagesBase64.d = await convertFileToBase64(optionImages.d)
           }
 
-          await set(refDB(db, `questions/${categoryId}/${questionKey}`), {
+          await firebaseSet(`questions/${categoryId}/${questionKey}`, {
             id: i + 1,
             question: question.text,
             options: {
@@ -1630,10 +1698,9 @@ export default function AdminPage() {
         try {
           // Extract category from questionKey (e.g., "matroos-1" -> "matroos")
           const category = questionKey.split("-")[0]
-          const questionRef = refDB(db, `questions/${category}/${questionKey}`)
 
-          // Update the question in the database
-          await update(questionRef, {
+          // Update the question in the database using REST API
+          await firebaseUpdate(`questions/${category}/${questionKey}`, {
             question: edit.question,
             correctAnswer: edit.correct.toUpperCase(),
             options: edit.options,
@@ -1714,7 +1781,7 @@ export default function AdminPage() {
 
     try {
       const questionKey = `${selectedCategory}-${questionId}`
-      await update(refDB(db, `questions/${selectedCategory}/${questionKey}`), {
+      await firebaseUpdate(`questions/${selectedCategory}/${questionKey}`, {
         needsReview: newFlag,
       })
 
@@ -1776,7 +1843,7 @@ export default function AdminPage() {
       console.log("[v0] Saving edit to Firebase questions node:", questionKey, sanitizeForLog(questionUpdates))
 
       // Update the question in the Firebase database
-      await update(refDB(db, `questions/${selectedCategory}/${questionKey}`), questionUpdates)
+      await firebaseUpdate(`questions/${selectedCategory}/${questionKey}`, questionUpdates)
 
       // Removed updating savedEdits state
       // const newSavedEdits = { ...savedEdits }
@@ -1819,11 +1886,11 @@ export default function AdminPage() {
 
       if (fbQuestion) {
         // Delete Firebase question completely
-        await remove(refDB(db, `questions/${selectedCategory}/${questionKey}`))
+        await firebaseRemove(`questions/${selectedCategory}/${questionKey}`)
         console.log("[v0] Deleted Firebase question:", questionKey)
       } else {
         // Mark .ts question as deleted
-        await set(refDB(db, `deletedQuestions/${selectedCategory}/${questionKey}`), true)
+        await firebaseSet(`deletedQuestions/${selectedCategory}/${questionKey}`, true)
         console.log("[v0] Marked .ts question as deleted:", questionKey)
       }
 
@@ -1912,7 +1979,7 @@ export default function AdminPage() {
           throw new Error(`Conflict detected: Question key ${questionKey} already exists`)
         }
 
-        await set(refDB(db, `questions/${selectedCategory}/${questionKey}`), {
+        await firebaseSet(`questions/${selectedCategory}/${questionKey}`, {
           id: nextId + i,
           question: question.text,
           options: {
@@ -2060,7 +2127,7 @@ export default function AdminPage() {
         console.log(`[v0] Moved ${result.movedQuestionsCount} questions to new category ID`)
       }
 
-      await saveCategory(newCategoryId, editingCategoryName, category.description, iconBase64)
+      await saveCategory(newCategoryId, editingCategoryName, editingCategoryDescription || category.description, iconBase64)
 
       toast({
         title: "Categorie bijgewerkt",
@@ -2140,13 +2207,28 @@ export default function AdminPage() {
                             </Button>
                           </label>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                           <Input
                             value={editingCategoryName}
                             onChange={(e) => setEditingCategoryName(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
                             className="max-w-md"
                             placeholder="Categorie naam"
+                            autoFocus
                           />
+                        </div>
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <Input
+                            value={editingCategoryDescription}
+                            onChange={(e) => setEditingCategoryDescription(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            className="max-w-md"
+                            placeholder="Beschrijving"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                           <Button onClick={() => handleSaveCategoryName(category.id)} size="sm">
                             Opslaan
                           </Button>
@@ -2155,6 +2237,7 @@ export default function AdminPage() {
                               setEditingCategoryId(null)
                               setEditingCategoryIcon(null)
                               setEditingCategoryIconPreview("")
+                              setEditingCategoryDescription("")
                             }}
                             variant="outline"
                             size="sm"
@@ -2179,6 +2262,7 @@ export default function AdminPage() {
                     onClick={() => {
                       setEditingCategoryId(category.id)
                       setEditingCategoryName(category.name)
+                      setEditingCategoryDescription(category.description || "")
                       setEditingCategoryIconPreview(category.icon || "")
                     }}
                   >
@@ -2491,7 +2575,174 @@ export default function AdminPage() {
       console.error("Error exporting all categories:", error)
       alert("Er is een fout opgetreden bij het exporteren van alle categorieën.")
     } finally {
-      setIsExporting(false) // Reset exporting state
+      setIsExporting(false)
+    }
+  }
+
+  const handleExportPdf = async () => {
+    if (!pdfExportCategory) return
+
+    setIsExportingPdf(true)
+    try {
+      const { jsPDF } = await import("jspdf")
+      const doc = new jsPDF()
+
+      const categoryData = allCategories.find((c) => c.id === pdfExportCategory)
+      const categoryName = categoryData?.name || pdfExportCategory
+
+      // Load questions for the selected category first
+      const questionsData = await firebaseGet(`questions/${pdfExportCategory}`)
+      if (!questionsData) {
+        alert("Geen vragen gevonden voor deze categorie.")
+        setIsExportingPdf(false)
+        return
+      }
+
+      // Filter questions by reeks if needed
+      const questions = Object.entries(questionsData)
+        .filter(([, q]: [string, any]) => {
+          if (pdfExportReeks !== "all" && q.reeks !== pdfExportReeks) return false
+          return true
+        })
+        .map(([, q]: [string, any]) => q)
+        .sort((a, b) => {
+          const numA = Number.parseInt(a.id?.toString() || "0")
+          const numB = Number.parseInt(b.id?.toString() || "0")
+          return numA - numB
+        })
+
+      if (questions.length === 0) {
+        alert("Geen vragen gevonden voor deze selectie.")
+        setIsExportingPdf(false)
+        return
+      }
+
+      // Helper function to load image as base64
+      const loadImageAsBase64 = async (url: string): Promise<string | null> => {
+        try {
+          // If already base64, return as is
+          if (url.startsWith("data:image")) {
+            return url
+          }
+          const response = await fetch(url)
+          const blob = await response.blob()
+          return new Promise((resolve) => {
+            const reader = new FileReader()
+            reader.onloadend = () => resolve(reader.result as string)
+            reader.onerror = () => resolve(null)
+            reader.readAsDataURL(blob)
+          })
+        } catch {
+          return null
+        }
+      }
+
+      // Title
+      doc.setFontSize(18)
+      doc.setFont("helvetica", "bold")
+      doc.setTextColor(0, 0, 0)
+      const title = pdfExportReeks === "all" 
+        ? `${categoryName} - Alle Vragen` 
+        : `${categoryName} - ${pdfExportReeks.toLowerCase().startsWith("reeks") ? pdfExportReeks : `Reeks ${pdfExportReeks}`}`
+      doc.text(title, 20, 20)
+
+      doc.setFontSize(10)
+      doc.setFont("helvetica", "normal")
+      doc.text(`Totaal: ${questions.length} vragen`, 20, 28)
+      doc.text(`Gegenereerd op: ${new Date().toLocaleDateString("nl-BE")}`, 20, 34)
+
+      let yPos = 45
+
+      for (let i = 0; i < questions.length; i++) {
+        const q = questions[i]
+        
+        // Estimate space needed for this question
+        const hasImage = pdfIncludeImages && (q.questionImage || q.image)
+        const estimatedHeight = hasImage ? 80 : 40
+        
+        // Check if we need a new page
+        if (yPos + estimatedHeight > 270) {
+          doc.addPage()
+          yPos = 20
+        }
+
+        // Question number and text
+        doc.setFontSize(11)
+        doc.setFont("helvetica", "bold")
+        doc.setTextColor(0, 0, 0)
+        const questionText = `${i + 1}. ${q.question || q.text || "Geen vraag tekst"}`
+        const splitQuestion = doc.splitTextToSize(questionText, 170)
+        doc.text(splitQuestion, 20, yPos)
+        yPos += splitQuestion.length * 5 + 3
+
+        // Add image if present
+        if (pdfIncludeImages && (q.questionImage || q.image)) {
+          const imageUrl = q.questionImage || q.image
+          const imageData = await loadImageAsBase64(imageUrl)
+          if (imageData) {
+            try {
+              // Check if we need a new page for the image
+              if (yPos + 45 > 270) {
+                doc.addPage()
+                yPos = 20
+              }
+              doc.addImage(imageData, "JPEG", 25, yPos, 60, 40)
+              yPos += 45
+            } catch (imgError) {
+              // Skip image if it fails to load
+              console.error("Failed to add image:", imgError)
+            }
+          }
+        }
+
+        // Options
+        doc.setFontSize(10)
+        doc.setFont("helvetica", "normal")
+        const options = ["a", "b", "c", "d"] as const
+        const optionLabels = ["A", "B", "C", "D"]
+        
+        options.forEach((opt, idx) => {
+          const optionText = q.options?.[opt] || q[`option${optionLabels[idx]}`] || ""
+          if (optionText) {
+            // Check various formats of correctAnswer
+            const correctAnswer = q.correctAnswer?.toLowerCase() || q.correct?.toLowerCase() || ""
+            const isCorrect = correctAnswer === opt || correctAnswer === optionLabels[idx].toLowerCase()
+            
+            // Set color for correct answer if option is enabled
+            if (isCorrect && pdfShowCorrectAnswers) {
+              doc.setTextColor(0, 128, 0) // Green
+              doc.setFont("helvetica", "bold")
+            } else {
+              doc.setTextColor(0, 0, 0) // Black
+              doc.setFont("helvetica", "normal")
+            }
+            
+            const prefix = `${optionLabels[idx]}) `
+            const fullOption = prefix + optionText
+            const splitOption = doc.splitTextToSize(fullOption, 165)
+            
+            doc.text(splitOption, 25, yPos)
+            yPos += splitOption.length * 4 + 2
+          }
+        })
+        
+        // Reset color
+        doc.setTextColor(0, 0, 0)
+
+        yPos += 8 // Space between questions
+      }
+
+      // Download
+      const fileName = pdfExportReeks === "all"
+        ? `${pdfExportCategory}-alle-vragen.pdf`
+        : `${pdfExportCategory}-${pdfExportReeks}.pdf`
+      doc.save(fileName)
+
+    } catch (error) {
+      console.error("Error exporting PDF:", error)
+      alert("Er is een fout opgetreden bij het maken van de PDF.")
+    } finally {
+      setIsExportingPdf(false)
     }
   }
 
@@ -2779,17 +3030,20 @@ export default function AdminPage() {
   }
 
   const handleSmartSave = async () => {
-    // Check if the category already exists
-    const categoryExists = allCategories.some(
-      (cat) => cat.id === newCategoryName || cat.id === newCategoryName.toLowerCase().replace(/\s+/g, "-"),
-    )
+    setIsSaving(true)
+    try {
+      // Check if the category already exists
+      const categoryExists = allCategories.some(
+        (cat) => cat.id === newCategoryName || cat.id === newCategoryName.toLowerCase().replace(/\s+/g, "-"),
+      )
 
-    if (isAddingToExistingCategory || categoryExists) {
-      console.log("[v0] Routing to: ADD TO EXISTING CATEGORY workflow")
-      await handleSaveQuestionsFromOverview()
-    } else {
-      console.log("[v0] Routing to: NEW CATEGORY workflow")
-      await handleSaveNewCategoryWithQuestions()
+      if (isAddingToExistingCategory || categoryExists) {
+        await handleSaveQuestionsFromOverview()
+      } else {
+        await handleSaveNewCategoryWithQuestions()
+      }
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -3050,8 +3304,8 @@ export default function AdminPage() {
           <button
             className={`py-3 px-4 text-sm font-medium ${
               activeTab === "categories"
-                ? "text-primary border-b-2 border-primary"
-                : "text-muted-foreground hover:text-primary"
+                ? "text-primary border-b-2 border-primary font-semibold"
+                : "text-foreground/70 hover:text-primary"
             }`}
             onClick={() => setActiveTab("categories")}
           >
@@ -3059,31 +3313,32 @@ export default function AdminPage() {
           </button>
           <button
             className={`py-3 px-4 text-sm font-medium ${
-              activeTab === "questions"
-                ? "text-primary border-b-2 border-primary"
-                : "text-muted-foreground hover:text-primary"
-            }`}
-            onClick={() => setActiveTab("questions")}
-          >
-            Vragen Beheren
-          </button>
-          <button
-            className={`py-3 px-4 text-sm font-medium ${
               activeTab === "stats"
-                ? "text-primary border-b-2 border-primary"
-                : "text-muted-foreground hover:text-primary"
+                ? "text-primary border-b-2 border-primary font-semibold"
+                : "text-foreground/70 hover:text-primary"
             }`}
             onClick={() => setActiveTab("stats")}
           >
             Statistieken
           </button>
+          <button
+            className={`py-3 px-4 text-sm font-medium ${
+              activeTab === "database"
+                ? "text-primary border-b-2 border-primary font-semibold"
+                : "text-foreground/70 hover:text-primary"
+            }`}
+            onClick={() => setActiveTab("database")}
+          >
+            Database Beheer
+          </button>
         </div>
 
         {activeTab === "categories" && (
-          <Card className="mb-8">
-            <CardHeader>
-              <CardTitle>Categorie Beheer</CardTitle>
-            </CardHeader>
+          <>
+            <Card className="mb-8">
+              <CardHeader>
+                <CardTitle>Categorie Beheer</CardTitle>
+              </CardHeader>
             <CardContent>
               <div className="space-y-6">
                 <div>
@@ -3092,7 +3347,6 @@ export default function AdminPage() {
                 </div>
 
                 <div className="pt-4 border-t">
-                  {/* Button text simplified to only "Nieuwe Categorie" */}
                   <Button onClick={handleTextUpload} className="w-full gap-2">
                     <Plus className="h-4 w-4" />
                     Nieuwe Categorie
@@ -3101,27 +3355,96 @@ export default function AdminPage() {
               </div>
             </CardContent>
           </Card>
-        )}
 
-        {activeTab === "questions" && (
-          <Card>
+          <Card className="mb-8">
             <CardHeader>
-              <CardTitle>Database Beheer</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <Flag className="h-5 w-5" />
+                Gemarkeerde Vragen
+              </CardTitle>
+              <CardDescription>Bekijk vragen die door testers zijn gemarkeerd voor review</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-2">
-              {/* CHANGE: Removed maintenance buttons and their associated state/handlers */}
-              <Button onClick={handleExportAllCategories} disabled={isExporting} className="w-full gap-2">
-                <Download className="h-4 w-4" />
-                Exporteer Volledige Backup (Alle Categorieën)
-              </Button>
-              {/* CHANGE: Added button to apply all saved edits */}
-              {/* <Button variant="outline" onClick={handleApplyAllEdits} className="w-full gap-2 bg-transparent">
-              <Upload className="h-4 w-4" />
-              Pas Alle Opgeslagen Aanpassingen Toe
-            </Button> */}
-              {/* REMOVED: handleApplyAllEdits button as savedEdits is no longer used */}
+            <CardContent className="space-y-4">
+              <div className="flex gap-4">
+                <Select value={selectedFlagCategory} onValueChange={setSelectedFlagCategory}>
+                  <SelectTrigger className="w-[300px]">
+                    <SelectValue placeholder="Selecteer categorie" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allCategories.map((cat) => (
+                      <SelectItem key={cat.id} value={cat.id}>
+                        {cat.name} {flaggedCountPerCategory[cat.id] > 0 && `(${flaggedCountPerCategory[cat.id]})`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Button onClick={() => loadFlaggedQuestions(selectedFlagCategory)}>Laad gemarkeerde vragen</Button>
+              </div>
+
+              {isLoadingFlags && <div className="text-center text-muted-foreground">Laden...</div>}
+
+              {!isLoadingFlags && flaggedQuestions.length === 0 && (
+                <div className="text-center text-muted-foreground">Geen gemarkeerde vragen voor deze categorie</div>
+              )}
+
+              {!isLoadingFlags && flaggedQuestions.length > 0 && (
+                <div className="space-y-4">
+                  <div className="text-sm text-muted-foreground">
+                    {flaggedQuestions.length} vraag{flaggedQuestions.length !== 1 ? "en" : ""} gemarkeerd
+                  </div>
+
+                  {flaggedQuestions.map((flag, index) => (
+                    <Card key={index} className="border-orange-200 bg-orange-50">
+                      <CardHeader>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Flag className="h-4 w-4 text-orange-500" />
+                          Vraag {flag.questionId}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        <div>
+                          <div className="font-medium">Vraag ID:</div>
+                          <div className="text-sm">{flag.questionId}</div>
+                        </div>
+                        <div>
+                          <div className="font-medium">Gemarkeerd door:</div>
+                          <div className="text-sm">{flag.username}</div>
+                        </div>
+                        <div>
+                          <div className="font-medium">Datum:</div>
+                          <div className="text-sm">{new Date(flag.timestamp).toLocaleString("nl-BE")}</div>
+                        </div>
+                        {flag.questionText && (
+                          <div>
+                            <div className="font-medium">Vraag:</div>
+                            <div className="text-sm">{flag.questionText}</div>
+                          </div>
+                        )}
+                        {flag.reason && (
+                          <div>
+                            <div className="font-medium">Reden:</div>
+                            <div className="text-sm">{flag.reason}</div>
+                          </div>
+                        )}
+                        <div className="flex gap-2 mt-4">
+                          <Button size="sm" onClick={() => handleOpenFlaggedQuestion(flag.questionId, flag.categoryId)}>
+                            <Edit className="h-4 w-4 mr-2" />
+                            Open in Editor
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handleRemoveFlag(flag)}>
+                            <X className="h-4 w-4 mr-2" />
+                            Verwijder Vlag
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
+          </>
         )}
 
         {activeTab === "stats" && (
@@ -3165,6 +3488,139 @@ export default function AdminPage() {
               </Card>
             </div>
           </div>
+        )}
+
+        {activeTab === "database" && (
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle>Database Beheer</CardTitle>
+              <CardDescription>Beheer en onderhoud van de Firebase database</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Backup Exporteren</CardTitle>
+                    <CardDescription className="text-xs">Download een volledige backup van alle categorieën</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Button 
+                      onClick={handleExportAllCategories} 
+                      disabled={isExporting} 
+                      className="w-full gap-2"
+                    >
+                      <Download className="h-4 w-4" />
+                      {isExporting ? "Exporteren..." : "Exporteer Backup"}
+                    </Button>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Exporteer als PDF</CardTitle>
+                    <CardDescription className="text-xs">Download vragen als PDF document</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <Select value={pdfExportCategory} onValueChange={setPdfExportCategory}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecteer categorie" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {allCategories.map((cat) => (
+                          <SelectItem key={cat.id} value={cat.id}>
+                            {cat.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {pdfExportCategory && (
+                      <Select value={pdfExportReeks} onValueChange={setPdfExportReeks}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Alle reeksen" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Alle reeksen</SelectItem>
+                          {pdfAvailableReeksen.map((reeks) => (
+                            <SelectItem key={reeks} value={reeks}>
+                              {reeks.toLowerCase().startsWith("reeks") ? reeks : `Reeks ${reeks}`}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <div className="space-y-2 pt-2 border-t">
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={pdfShowCorrectAnswers}
+                          onChange={(e) => setPdfShowCorrectAnswers(e.target.checked)}
+                          className="rounded border-gray-300"
+                        />
+                        Correcte antwoorden groen markeren
+                      </label>
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={pdfIncludeImages}
+                          onChange={(e) => setPdfIncludeImages(e.target.checked)}
+                          className="rounded border-gray-300"
+                        />
+                        Afbeeldingen toevoegen
+                      </label>
+                    </div>
+                    <Button 
+                      onClick={handleExportPdf} 
+                      disabled={!pdfExportCategory || isExportingPdf} 
+                      className="w-full gap-2"
+                    >
+                      <FileDown className="h-4 w-4" />
+                      {isExportingPdf ? "PDF maken..." : "Exporteer PDF"}
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Timestamp Migratie</CardTitle>
+                    <CardDescription className="text-xs">Converteer oude timestamps naar ISO formaat</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setShowTimestampMigration(true)}
+                      className="w-full"
+                    >
+                      Start Migratie
+                    </Button>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Database Statistieken</CardTitle>
+                    <CardDescription className="text-xs">Overzicht van database inhoud</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Categorieën:</span>
+                      <span className="font-medium">{allCategories.length}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Vragen:</span>
+                      <span className="font-medium">{totalQuestionsCount}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Gebruikers:</span>
+                      <span className="font-medium">{userStats.totalUsers}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Gemarkeerd:</span>
+                      <span className="font-medium">{totalFlaggedCount}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         <Dialog open={showTimestampMigration} onOpenChange={setShowTimestampMigration}>
@@ -3372,13 +3828,11 @@ export default function AdminPage() {
                         <SelectValue placeholder="Selecteer of maak een reeks" />
                       </SelectTrigger>
                       <SelectContent>
-                        {availableReeksOptions.length > 0 &&
-                          availableReeksOptions.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        <SelectItem value="new">+ Nieuwe Reeks Aanmaken</SelectItem>
+                        {availableReeksOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -3628,9 +4082,16 @@ export default function AdminPage() {
                     <Button
                       onClick={handleSmartSave}
                       className="flex-1"
-                      disabled={!newCategoryName.trim() && !isAddingToExistingCategory}
+                      disabled={isSaving || (!newCategoryName.trim() && !isAddingToExistingCategory)}
                     >
-                      Vragen Opslaan
+                      {isSaving ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Vragen opslaan...
+                        </>
+                      ) : (
+                        "Vragen Opslaan"
+                      )}
                     </Button>
                     <Button
                       variant="outline"
@@ -3666,7 +4127,10 @@ export default function AdminPage() {
                 <CardTitle>
                   Vragen Overzicht - {allCategories.find((c) => c.id === selectedCategory)?.name || selectedCategory}
                 </CardTitle>
-                <Button variant="ghost" size="sm" onClick={() => setShowQuestionBrowser(false)}>
+                <Button variant="ghost" size="sm" onClick={() => {
+                    setShowQuestionBrowser(false)
+                    setActiveTab("categories")
+                  }}>
                   Sluiten
                 </Button>
               </div>
@@ -3681,7 +4145,7 @@ export default function AdminPage() {
                       <SelectValue className="truncate" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">Alle Reeksen ({totalQuestionsCount} vragen)</SelectItem>
+                      <SelectItem value="all">Alle Reeksen ({Object.keys(firebaseQuestions).length} vragen)</SelectItem>
                       {availableReeksOptions
                         .filter((option) => option.value !== "new")
                         .map((option) => {
@@ -4792,95 +5256,6 @@ export default function AdminPage() {
           </DialogContent>
         </Dialog>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Flag className="h-5 w-5" />
-              Gemarkeerde Vragen
-            </CardTitle>
-            <CardDescription>Bekijk vragen die door testers zijn gemarkeerd voor review</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex gap-4">
-              <Select value={selectedFlagCategory} onValueChange={setSelectedFlagCategory}>
-                <SelectTrigger className="w-[300px]">
-                  <SelectValue placeholder="Selecteer categorie" />
-                </SelectTrigger>
-                <SelectContent>
-                  {allCategories.map((cat) => (
-                    <SelectItem key={cat.id} value={cat.id}>
-                      {cat.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Button onClick={() => loadFlaggedQuestions(selectedFlagCategory)}>Laad gemarkeerde vragen</Button>
-            </div>
-
-            {isLoadingFlags && <div className="text-center text-muted-foreground">Laden...</div>}
-
-            {!isLoadingFlags && flaggedQuestions.length === 0 && (
-              <div className="text-center text-muted-foreground">Geen gemarkeerde vragen voor deze categorie</div>
-            )}
-
-            {!isLoadingFlags && flaggedQuestions.length > 0 && (
-              <div className="space-y-4">
-                <div className="text-sm text-muted-foreground">
-                  {flaggedQuestions.length} vraag{flaggedQuestions.length !== 1 ? "en" : ""} gemarkeerd
-                </div>
-
-                {flaggedQuestions.map((flag, index) => (
-                  <Card key={index} className="border-orange-200 bg-orange-50">
-                    <CardHeader>
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <Flag className="h-4 w-4 text-orange-500" />
-                        Vraag {flag.questionId}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      <div>
-                        <div className="font-medium">Vraag ID:</div>
-                        <div className="text-sm">{flag.questionId}</div>
-                      </div>
-                      <div>
-                        <div className="font-medium">Gemarkeerd door:</div>
-                        <div className="text-sm">{flag.username}</div>
-                      </div>
-                      <div>
-                        <div className="font-medium">Datum:</div>
-                        <div className="text-sm">{new Date(flag.timestamp).toLocaleString("nl-BE")}</div>
-                      </div>
-                      {flag.questionText && (
-                        <div>
-                          <div className="font-medium">Vraag:</div>
-                          <div className="text-sm">{flag.questionText}</div>
-                        </div>
-                      )}
-                      {flag.reason && (
-                        <div>
-                          <div className="font-medium">Reden:</div>
-                          <div className="text-sm">{flag.reason}</div>
-                        </div>
-                      )}
-                      {/* Adding action buttons to open question in editor and remove flag */}
-                      <div className="flex gap-2 mt-4">
-                        <Button size="sm" onClick={() => handleOpenFlaggedQuestion(flag.questionId, flag.categoryId)}>
-                          <Edit className="h-4 w-4 mr-2" />
-                          Open in Editor
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => handleRemoveFlag(flag)}>
-                          <X className="h-4 w-4 mr-2" />
-                          Verwijder Vlag
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
       </div>
     </div>
   )

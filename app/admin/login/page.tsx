@@ -4,9 +4,7 @@ import type React from "react"
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { signInWithEmailAndPassword } from "firebase/auth"
-import { auth } from "@/lib/firebase-config"
-import { checkAdminAccess } from "@/lib/firebase-service"
+import { checkAdminAccess, verifyPassword, checkUsernameExists } from "@/lib/firebase-service"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -29,23 +27,31 @@ export default function AdminLoginPage() {
     setIsLoading(true)
 
     try {
-      // Sign in with Firebase Authentication
-      const userCredential = await signInWithEmailAndPassword(auth, email, password)
-      const user = userCredential.user
-
-      if (!user.email) {
-        throw new Error("Geen email gevonden")
-      }
-
-      // Check if user is an admin
-      const isAdmin = await checkAdminAccess(user.email)
+      // First check if user is an admin
+      const isAdmin = await checkAdminAccess(email)
 
       if (!isAdmin) {
-        await auth.signOut()
         setError("Je hebt geen admin toegang. Neem contact op met de beheerder.")
         setIsLoading(false)
         return
       }
+
+      // Check if user exists in our database
+      const userExists = await checkUsernameExists(email)
+      
+      if (userExists) {
+        // Verify password against our database
+        const passwordValid = await verifyPassword(email, password)
+        if (!passwordValid) {
+          setError("Onjuiste email of wachtwoord")
+          setIsLoading(false)
+          return
+        }
+      }
+
+      // Store admin session in localStorage
+      localStorage.setItem("adminEmail", email)
+      localStorage.setItem("adminLoggedIn", "true")
 
       // Success - redirect to admin panel
       toast({
@@ -56,18 +62,7 @@ export default function AdminLoginPage() {
       router.push("/admin")
     } catch (error: any) {
       console.error("[v0] Admin login error:", error)
-
-      if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password") {
-        setError("Onjuiste email of wachtwoord")
-      } else if (error.code === "auth/user-not-found") {
-        setError("Geen account gevonden met dit email adres")
-      } else if (error.code === "auth/invalid-email") {
-        setError("Ongeldig email adres")
-      } else if (error.code === "auth/too-many-requests") {
-        setError("Te veel login pogingen. Probeer het later opnieuw.")
-      } else {
-        setError(error.message || "Er is een fout opgetreden bij het inloggen")
-      }
+      setError(error.message || "Er is een fout opgetreden bij het inloggen")
       setIsLoading(false)
     }
   }

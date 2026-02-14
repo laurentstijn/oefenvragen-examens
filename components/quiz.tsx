@@ -23,11 +23,11 @@ import {
   flagQuestion,
   unflagQuestion,
   getUserFlaggedQuestions,
+  loadQuestionsFromFirebase,
 } from "@/lib/firebase-service"
 import { useAuth } from "@/contexts/auth-context"
-import { db } from "@/lib/firebase-config"
-import { ref, get } from "firebase/database"
 import { useToast } from "@/components/ui/use-toast"
+import { firebaseGet } from "@/lib/firebase-rest"
 
 interface QuizProps {
   onQuizComplete?: () => void
@@ -168,13 +168,13 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
       try {
         setIsLoadingQuestions(true)
 
-        // Load Firebase questions for this category
+        // Load Firebase questions for this category using REST API
         const categoryId = category
-        const deletedRef = ref(db, `questions/${categoryId}/deleted`)
-        const deletedSnapshot = await get(deletedRef)
+        
+        // Get deleted questions
+        const deletedData = await firebaseGet(`questions/${categoryId}/deleted`)
         const deletedIds: string[] = []
-        if (deletedSnapshot.exists()) {
-          const deletedData = deletedSnapshot.val()
+        if (deletedData) {
           Object.keys(deletedData).forEach((key) => {
             if (deletedData[key] === true) {
               deletedIds.push(key)
@@ -182,10 +182,9 @@ export default function Quiz({ onQuizComplete, onQuizStateChange, category = "ra
           })
         }
 
-        const questionsRef = ref(db, `questions/${categoryId}`)
-        const snapshot = await get(questionsRef)
-        if (snapshot.exists()) {
-          const data = snapshot.val()
+        // Get all questions
+        const data = await firebaseGet(`questions/${categoryId}`)
+        if (data) {
           const loadedQuestions = Object.entries(data)
             .filter(([key]) => !deletedIds.includes(key))
             .map(([key, q]) => {
